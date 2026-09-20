@@ -12,11 +12,15 @@ from app.schemas.order import (
 )
 from app.services.order import (
     InactiveOrderProductError,
+    InsufficientOrderStockError,
+    InvalidOrderItemQuantityError,
+    InvalidOrderStatusTransitionError,
     OrderCustomerNotFoundError,
     OrderNotFoundError,
     OrderProductNotFoundError,
     OrderService,
     OrderTotalOutOfRangeError,
+    UnavailableOrderItemProductError,
 )
 
 router = APIRouter(
@@ -105,5 +109,15 @@ def update_order(
         return service.update(order_id, data)
     except OrderNotFoundError as exc:
         raise not_found_response("Order not found") from exc
+    except InvalidOrderStatusTransitionError as exc:
+        raise conflict_response("Invalid order status transition") from exc
+    except InsufficientOrderStockError as exc:
+        raise conflict_response("Insufficient stock to confirm order") from exc
+    except InvalidOrderItemQuantityError as exc:
+        raise conflict_response("Order contains an invalid item quantity") from exc
+    except UnavailableOrderItemProductError as exc:
+        raise conflict_response("Order item product is unavailable") from exc
+    except InactiveOrderProductError as exc:
+        raise conflict_response("Inactive products cannot be confirmed") from exc
     except OrderPersistenceError as exc:
         raise conflict_response("Order status could not be updated") from exc

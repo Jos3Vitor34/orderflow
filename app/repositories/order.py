@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.customer import Customer
@@ -62,6 +62,27 @@ class OrderRepository:
         )
         return self._session.scalar(statement)
 
+    def get_by_id_for_update(self, order_id: int) -> Order | None:
+        statement = (
+            select(Order)
+            .options(selectinload(Order.items))
+            .where(Order.id == order_id)
+            .with_for_update()
+        )
+        return self._session.scalar(statement)
+
+    def get_products_by_ids_for_update(
+        self,
+        product_ids: set[int],
+    ) -> list[Product]:
+        statement = (
+            select(Product)
+            .where(Product.id.in_(product_ids))
+            .order_by(Product.id.asc())
+            .with_for_update()
+        )
+        return list(self._session.scalars(statement).all())
+
     def list_page(self, *, offset: int, limit: int) -> tuple[list[Order], int]:
         total = self._session.scalar(select(func.count()).select_from(Order)) or 0
         statement = (
@@ -77,10 +98,10 @@ class OrderRepository:
         order.status = new_status
         try:
             self._session.commit()
-        except IntegrityError as exc:
+        except SQLAlchemyError as exc:
             self._session.rollback()
             raise OrderPersistenceError from exc
-        persisted = self.get_by_id(order.id)
-        if persisted is None:
-            raise OrderPersistenceError
-        return persisted
+        return order
+
+    def rollback(self) -> None:
+        self._session.rollback()

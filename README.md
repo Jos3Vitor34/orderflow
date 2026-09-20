@@ -128,14 +128,27 @@ Preços usam valores decimais e SKU mantém a capitalização fornecida.
 
 Orders são globais e exigem Bearer access token válido. O servidor obtém o preço
 atual de cada Product, grava-o como snapshot no OrderItem e calcula o total usando
-`Decimal`. A criação não altera estoque porque o domínio atual ainda não define em
-qual etapa do ciclo do pedido ocorre consumo ou reposição.
+`Decimal`. A criação não altera estoque.
 
 - `POST /api/v1/orders`: cria atomicamente um Order e seus OrderItems.
 - `GET /api/v1/orders`: lista com `page` e `page_size` (máximo 100).
 - `GET /api/v1/orders/{order_id}`: retorna o Order com seus itens.
-- `PATCH /api/v1/orders/{order_id}`: altera somente o status para um valor do
-  enum existente.
+- `PATCH /api/v1/orders/{order_id}`: aplica uma transição da máquina de estados.
+
+O ciclo permitido é `pending -> processing -> confirmed -> shipped -> delivered`;
+o único cancelamento permitido é `pending -> cancelled`. Repetir o estado atual é
+idempotente e retorna o recurso sem novo efeito. Saltos, regressões, mudanças de
+estados terminais, estoque insuficiente e produtos inativos durante a confirmação
+retornam `409 Conflict`.
+
+O estoque é debitado exclusivamente em `processing -> confirmed`, usando a
+quantidade persistida em cada OrderItem. A confirmação bloqueia primeiro o Order e
+depois todos os Products com `SELECT ... FOR UPDATE`; Products são bloqueados em
+ordem crescente de ID. Disponibilidade, débitos e mudança para `confirmed` usam um
+único commit, portanto uma falha reverte o pedido e todos os estoques. As demais
+transições, inclusive `pending -> cancelled`, não movimentam nem repõem estoque.
+Payments, Refunds e webhooks financeiros permanecem separados desse ciclo e não
+alteram Order ou estoque.
 
 Exemplo de criação:
 
@@ -151,6 +164,10 @@ Exemplo de criação:
 
 Preço, total e status inicial não são aceitos do cliente. Não existe endpoint de
 exclusão ou CRUD independente de OrderItem nesta fase.
+
+Limitações deliberadas: não há cancelamento depois de `pending`, reposição por
+Refund/Payment, reserva antecipada em `processing` nem exigência de pagamento
+aprovado para confirmar.
 
 ## Payments
 

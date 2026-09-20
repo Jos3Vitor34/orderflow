@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.models.order import Order
+from app.models.order import Order, OrderStatus
 from app.repositories.order import OrderRepository
 from app.schemas.order import (
     OrderCreate,
@@ -31,6 +31,42 @@ class InactiveOrderProductError(Exception):
 
 class OrderTotalOutOfRangeError(Exception):
     """Raised when a calculated total cannot fit Numeric(12, 2)."""
+
+
+class InvalidOrderStatusTransitionError(Exception):
+    """Raised when an Order status transition violates its lifecycle."""
+
+
+class InsufficientOrderStockError(Exception):
+    """Raised when an Order cannot be fulfilled from current locked stock."""
+
+
+class InvalidOrderItemQuantityError(Exception):
+    """Raised when persisted OrderItem data cannot be fulfilled safely."""
+
+
+class UnavailableOrderItemProductError(Exception):
+    """Raised when a persisted OrderItem no longer has an available Product."""
+
+
+ALLOWED_ORDER_STATUS_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
+    OrderStatus.PENDING: frozenset({OrderStatus.PROCESSING, OrderStatus.CANCELLED}),
+    OrderStatus.PROCESSING: frozenset({OrderStatus.CONFIRMED}),
+    OrderStatus.CONFIRMED: frozenset({OrderStatus.SHIPPED}),
+    OrderStatus.SHIPPED: frozenset({OrderStatus.DELIVERED}),
+    OrderStatus.DELIVERED: frozenset(),
+    OrderStatus.CANCELLED: frozenset(),
+}
+
+
+def validate_order_status_transition(
+    current_status: OrderStatus,
+    new_status: OrderStatus,
+) -> None:
+    if current_status == new_status:
+        return
+    if new_status not in ALLOWED_ORDER_STATUS_TRANSITIONS[current_status]:
+        raise InvalidOrderStatusTransitionError
 
 
 class OrderService:
@@ -102,7 +138,43 @@ class OrderService:
         return self._to_response(order)
 
     def update(self, order_id: int, data: OrderUpdate) -> OrderResponse:
-        order = self._repository.get_by_id(order_id)
+        order = self._repository.get_by_id_for_update(order_id)
         if order is None:
+            self._repository.rollback()
             raise OrderNotFoundError
-        return self._to_response(self._repository.update_status(order, data.status))
+        try:
+            validate_order_status_transition(order.status, data.status)
+            if order.status == data.status:
+                self._repository.rollback()
+                return self._to_response(order)
+
+            if (
+                order.status == OrderStatus.PROCESSING
+                and data.status == OrderStatus.CONFIRMED
+            ):
+                self._debit_stock_for_confirmation(order)
+
+            persisted = self._repository.update_status(order, data.status)
+        except Exception:
+            self._repository.rollback()
+            raise
+        return self._to_response(persisted)
+
+    def _debit_stock_for_confirmation(self, order: Order) -> None:
+        if not order.items or any(item.quantity <= 0 for item in order.items):
+            raise InvalidOrderItemQuantityError
+
+        product_ids = {item.product_id for item in order.items}
+        products = self._repository.get_products_by_ids_for_update(product_ids)
+        products_by_id = {product.id: product for product in products}
+        if products_by_id.keys() != product_ids:
+            raise UnavailableOrderItemProductError
+        if any(not product.is_active for product in products):
+            raise InactiveOrderProductError
+
+        for item in order.items:
+            if products_by_id[item.product_id].stock < item.quantity:
+                raise InsufficientOrderStockError
+
+        for item in order.items:
+            products_by_id[item.product_id].stock -= item.quantity

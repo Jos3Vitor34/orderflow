@@ -13,7 +13,11 @@ from app.models.order_item import OrderItem
 from app.models.product import Product
 from app.models.user import User
 from app.repositories.order import OrderPersistenceError
-from app.services.order import OrderService
+from app.services.order import (
+    InvalidOrderStatusTransitionError,
+    OrderService,
+    validate_order_status_transition,
+)
 
 
 class InMemoryOrderRepository:
@@ -23,6 +27,11 @@ class InMemoryOrderRepository:
         self.orders: dict[int, Order] = {}
         self.create_calls = 0
         self.fail_next_create = False
+        self.fail_next_update = False
+        self.rollback_calls = 0
+        self.order_lock_calls: list[int] = []
+        self.product_lock_calls: list[list[int]] = []
+        self._stock_snapshot: dict[int, int] = {}
         self._next_order_id = 1
         self._next_item_id = 1
 
@@ -76,14 +85,42 @@ class InMemoryOrderRepository:
     def get_by_id(self, order_id: int) -> Order | None:
         return self.orders.get(order_id)
 
+    def get_by_id_for_update(self, order_id: int) -> Order | None:
+        self.order_lock_calls.append(order_id)
+        return self.orders.get(order_id)
+
+    def get_products_by_ids_for_update(
+        self,
+        product_ids: set[int],
+    ) -> list[Product]:
+        ordered_ids = sorted(product_ids)
+        self.product_lock_calls.append(ordered_ids)
+        products = [
+            self.products[product_id]
+            for product_id in ordered_ids
+            if product_id in self.products
+        ]
+        self._stock_snapshot = {product.id: product.stock for product in products}
+        return products
+
     def list_page(self, *, offset: int, limit: int) -> tuple[list[Order], int]:
         orders = sorted(self.orders.values(), key=lambda order: order.id)
         return orders[offset : offset + limit], len(orders)
 
     def update_status(self, order: Order, new_status: OrderStatus) -> Order:
+        if self.fail_next_update:
+            self.fail_next_update = False
+            raise OrderPersistenceError
         order.status = new_status
         order.updated_at = datetime.now(UTC)
+        self._stock_snapshot = {}
         return order
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+        for product_id, stock in self._stock_snapshot.items():
+            self.products[product_id].stock = stock
+        self._stock_snapshot = {}
 
 
 @pytest.fixture
@@ -404,22 +441,314 @@ def test_get_missing_order_returns_404(
     assert response.status_code == 404
 
 
-def test_patch_order_allows_only_declared_status(
+def test_patch_order_applies_the_valid_lifecycle_without_changing_snapshots(
     order_context: tuple[TestClient, InMemoryOrderRepository],
 ) -> None:
-    client, _ = order_context
-    created = create_order(client)
-
-    response = client.patch(
-        f"/api/v1/orders/{created['id']}",
-        json={"status": "confirmed"},
+    client, repository = order_context
+    created = create_order(
+        client,
+        {
+            "customer_id": 1,
+            "items": [
+                {"product_id": 20, "quantity": 2},
+                {"product_id": 30, "quantity": 1},
+            ],
+        },
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "confirmed"
-    assert response.json()["customer_id"] == created["customer_id"]
-    assert response.json()["total_amount"] == created["total_amount"]
-    assert response.json()["items"] == created["items"]
+    responses = []
+    for target in ["processing", "confirmed", "shipped", "delivered"]:
+        responses.append(
+            client.patch(
+                f"/api/v1/orders/{created['id']}",
+                json={"status": target},
+            )
+        )
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 200]
+    assert responses[-1].json()["status"] == "delivered"
+    assert responses[-1].json()["customer_id"] == created["customer_id"]
+    assert responses[-1].json()["total_amount"] == created["total_amount"]
+    assert responses[-1].json()["items"] == created["items"]
+    assert repository.products[20].stock == 1
+    assert repository.products[30].stock == 0
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        (OrderStatus.PENDING, OrderStatus.PROCESSING),
+        (OrderStatus.PROCESSING, OrderStatus.CONFIRMED),
+        (OrderStatus.CONFIRMED, OrderStatus.SHIPPED),
+        (OrderStatus.SHIPPED, OrderStatus.DELIVERED),
+        (OrderStatus.PENDING, OrderStatus.CANCELLED),
+    ],
+)
+def test_order_state_machine_accepts_only_declared_edges(
+    current: OrderStatus,
+    target: OrderStatus,
+) -> None:
+    validate_order_status_transition(current, target)
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        (OrderStatus.PENDING, OrderStatus.CONFIRMED),
+        (OrderStatus.PENDING, OrderStatus.SHIPPED),
+        (OrderStatus.PROCESSING, OrderStatus.SHIPPED),
+        (OrderStatus.PROCESSING, OrderStatus.CANCELLED),
+        (OrderStatus.CONFIRMED, OrderStatus.PROCESSING),
+        (OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
+        (OrderStatus.SHIPPED, OrderStatus.CONFIRMED),
+        (OrderStatus.SHIPPED, OrderStatus.CANCELLED),
+        (OrderStatus.DELIVERED, OrderStatus.PENDING),
+        (OrderStatus.CANCELLED, OrderStatus.PENDING),
+    ],
+)
+def test_order_state_machine_rejects_skips_regressions_and_terminal_changes(
+    current: OrderStatus,
+    target: OrderStatus,
+) -> None:
+    with pytest.raises(InvalidOrderStatusTransitionError):
+        validate_order_status_transition(current, target)
+
+
+@pytest.mark.parametrize("status_value", list(OrderStatus))
+def test_order_state_machine_treats_same_state_as_idempotent(
+    status_value: OrderStatus,
+) -> None:
+    validate_order_status_transition(status_value, status_value)
+
+
+def test_pending_to_processing_and_pending_to_cancelled_do_not_move_stock(
+    order_context: tuple[TestClient, InMemoryOrderRepository],
+) -> None:
+    client, repository = order_context
+    processing_order = create_order(
+        client,
+        {"customer_id": 1, "items": [{"product_id": 20, "quantity": 2}]},
+    )
+    cancelled_order = create_order(
+        client,
+        {"customer_id": 1, "items": [{"product_id": 30, "quantity": 1}]},
+    )
+    stock_before = {key: product.stock for key, product in repository.products.items()}
+
+    processing = client.patch(
+        f"/api/v1/orders/{processing_order['id']}",
+        json={"status": "processing"},
+    )
+    cancelled = client.patch(
+        f"/api/v1/orders/{cancelled_order['id']}",
+        json={"status": "cancelled"},
+    )
+
+    assert processing.status_code == 200
+    assert cancelled.status_code == 200
+    assert {key: product.stock for key, product in repository.products.items()} == (
+        stock_before
+    )
+    assert repository.product_lock_calls == []
+
+
+def test_confirmation_uses_persisted_quantities_and_exact_stock(
+    order_context: tuple[TestClient, InMemoryOrderRepository],
+) -> None:
+    client, repository = order_context
+    created = create_order(
+        client,
+        {
+            "customer_id": 1,
+            "items": [
+                {"product_id": 20, "quantity": 3},
+                {"product_id": 30, "quantity": 1},
+            ],
+        },
+    )
+    original_items = created["items"]
+    assert (
+        client.patch(
+            f"/api/v1/orders/{created['id']}", json={"status": "processing"}
+        ).status_code
+        == 200
+    )
+
+    confirmed = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()["items"] == original_items
+    assert repository.products[20].stock == 0
+    assert repository.products[30].stock == 0
+    assert repository.product_lock_calls == [[20, 30]]
+
+
+def test_one_insufficient_item_rejects_entire_confirmation_and_recovers(
+    order_context: tuple[TestClient, InMemoryOrderRepository],
+) -> None:
+    client, repository = order_context
+    created = create_order(
+        client,
+        {
+            "customer_id": 1,
+            "items": [
+                {"product_id": 20, "quantity": 2},
+                {"product_id": 30, "quantity": 2},
+            ],
+        },
+    )
+    client.patch(f"/api/v1/orders/{created['id']}", json={"status": "processing"})
+    stock_before = {
+        20: repository.products[20].stock,
+        30: repository.products[30].stock,
+    }
+
+    failed = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+    assert failed.status_code == 409
+    assert repository.orders[created["id"]].status == OrderStatus.PROCESSING
+    assert {
+        20: repository.products[20].stock,
+        30: repository.products[30].stock,
+    } == stock_before
+
+    repository.products[30].stock = 2
+    recovered = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+
+    assert repository.orders[created["id"]].status == OrderStatus.CONFIRMED
+    assert repository.products[20].stock == 1
+    assert repository.products[30].stock == 0
+    assert recovered.status_code == 200
+
+
+def test_missing_or_inactive_persisted_product_rejects_confirmation(
+    order_context: tuple[TestClient, InMemoryOrderRepository],
+) -> None:
+    client, repository = order_context
+    missing = create_order(
+        client,
+        {"customer_id": 1, "items": [{"product_id": 20, "quantity": 1}]},
+    )
+    inactive = create_order(
+        client,
+        {"customer_id": 1, "items": [{"product_id": 30, "quantity": 1}]},
+    )
+    for order in (missing, inactive):
+        client.patch(f"/api/v1/orders/{order['id']}", json={"status": "processing"})
+    repository.products.pop(20)
+    repository.products[30].is_active = False
+
+    missing_response = client.patch(
+        f"/api/v1/orders/{missing['id']}", json={"status": "confirmed"}
+    )
+    inactive_response = client.patch(
+        f"/api/v1/orders/{inactive['id']}", json={"status": "confirmed"}
+    )
+
+    assert missing_response.status_code == 409
+    assert inactive_response.status_code == 409
+    assert repository.orders[missing["id"]].status == OrderStatus.PROCESSING
+    assert repository.orders[inactive["id"]].status == OrderStatus.PROCESSING
+
+
+def test_invalid_persisted_item_quantity_rejects_confirmation_without_stock_change(
+    order_context: tuple[TestClient, InMemoryOrderRepository],
+) -> None:
+    client, repository = order_context
+    created = create_order(
+        client,
+        {"customer_id": 1, "items": [{"product_id": 20, "quantity": 1}]},
+    )
+    client.patch(f"/api/v1/orders/{created['id']}", json={"status": "processing"})
+    repository.orders[created["id"]].items[0].quantity = 0
+
+    response = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+
+    assert response.status_code == 409
+    assert repository.orders[created["id"]].status == OrderStatus.PROCESSING
+    assert repository.products[20].stock == 3
+
+
+def test_invalid_transition_and_repeated_confirmation_never_move_stock_twice(
+    order_context: tuple[TestClient, InMemoryOrderRepository],
+) -> None:
+    client, repository = order_context
+    created = create_order(
+        client,
+        {"customer_id": 1, "items": [{"product_id": 20, "quantity": 1}]},
+    )
+    invalid = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+    client.patch(f"/api/v1/orders/{created['id']}", json={"status": "processing"})
+    first = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+    stock_after_first = repository.products[20].stock
+    repeated = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+
+    assert invalid.status_code == 409
+    assert first.status_code == 200
+    assert repeated.status_code == 200
+    assert repository.products[20].stock == stock_after_first == 2
+    assert repository.product_lock_calls == [[20]]
+
+
+def test_shipped_and_delivered_transitions_do_not_move_stock(
+    order_context: tuple[TestClient, InMemoryOrderRepository],
+) -> None:
+    client, repository = order_context
+    created = create_order(
+        client,
+        {"customer_id": 1, "items": [{"product_id": 20, "quantity": 1}]},
+    )
+    for target in ("processing", "confirmed"):
+        client.patch(f"/api/v1/orders/{created['id']}", json={"status": target})
+    stock_after_confirmation = repository.products[20].stock
+
+    shipped = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "shipped"}
+    )
+    delivered = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "delivered"}
+    )
+
+    assert shipped.status_code == 200
+    assert delivered.status_code == 200
+    assert repository.products[20].stock == stock_after_confirmation
+    assert repository.product_lock_calls == [[20]]
+
+
+def test_update_failure_rolls_back_stock_and_session_is_reusable(
+    order_context: tuple[TestClient, InMemoryOrderRepository],
+) -> None:
+    client, repository = order_context
+    created = create_order(
+        client,
+        {"customer_id": 1, "items": [{"product_id": 20, "quantity": 2}]},
+    )
+    client.patch(f"/api/v1/orders/{created['id']}", json={"status": "processing"})
+    repository.fail_next_update = True
+
+    failed = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+    recovered = client.patch(
+        f"/api/v1/orders/{created['id']}", json={"status": "confirmed"}
+    )
+
+    assert failed.status_code == 409
+    assert recovered.status_code == 200
+    assert repository.products[20].stock == 1
 
 
 @pytest.mark.parametrize(

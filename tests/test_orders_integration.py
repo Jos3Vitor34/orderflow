@@ -78,7 +78,7 @@ def test_complete_order_flow_atomicity_and_snapshot_against_postgresql() -> None
 
                 products = []
                 for sku, price, stock, is_active in [
-                    ("ORDER-A", "19.90", 0, True),
+                    ("ORDER-A", "19.90", 2, True),
                     ("ORDER-B", "0.01", 3, True),
                     ("ORDER-C", "199.99", 1, True),
                     ("ORDER-INACTIVE", "5.00", 10, False),
@@ -144,7 +144,7 @@ def test_complete_order_flow_atomicity_and_snapshot_against_postgresql() -> None
                             .order_by(Product.id)
                         )
                     )
-                    assert stock_after_order == [0, 3, 1]
+                    assert stock_after_order == [2, 3, 1]
 
                 snapshot_product = products[0]
                 product_patch = client.patch(
@@ -216,14 +216,28 @@ def test_complete_order_flow_atomicity_and_snapshot_against_postgresql() -> None
                 )
                 assert recovery_response.status_code == 201
 
-                patch_response = client.patch(
-                    f"/api/v1/orders/{created_order['id']}",
-                    json={"status": "shipped"},
-                    headers=headers,
-                )
-                assert patch_response.status_code == 200
+                for target_status in ("processing", "confirmed", "shipped"):
+                    patch_response = client.patch(
+                        f"/api/v1/orders/{created_order['id']}",
+                        json={"status": target_status},
+                        headers=headers,
+                    )
+                    assert patch_response.status_code == 200
                 assert patch_response.json()["status"] == "shipped"
                 assert patch_response.json()["total_amount"] == "239.82"
+
+                with Session(bind=schema_connection) as inspection_session:
+                    assert list(
+                        inspection_session.scalars(
+                            select(Product.stock)
+                            .where(
+                                Product.id.in_(
+                                    [product["id"] for product in products[:3]]
+                                )
+                            )
+                            .order_by(Product.id)
+                        )
+                    ) == [0, 0, 0]
 
                 executed_statements: list[str] = []
 
