@@ -1,3 +1,6 @@
+import logging
+from collections.abc import Callable
+
 from app.models.order import OrderStatus
 from app.models.payment import Payment, PaymentStatus
 from app.repositories.payment import (
@@ -10,6 +13,8 @@ from app.schemas.payment import (
     PaymentResponse,
     PaymentUpdate,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PaymentNotFoundError(Exception):
@@ -54,8 +59,14 @@ def validate_payment_status_transition(
 
 
 class PaymentService:
-    def __init__(self, repository: PaymentRepository) -> None:
+    def __init__(
+        self,
+        repository: PaymentRepository,
+        *,
+        notification_publisher: Callable[[int], object] | None = None,
+    ) -> None:
         self._repository = repository
+        self._notification_publisher = notification_publisher
 
     @staticmethod
     def _same_idempotent_request(payment: Payment, data: PaymentCreate) -> bool:
@@ -124,4 +135,13 @@ class PaymentService:
         validate_payment_status_transition(payment.status, data.status)
         if data.status == payment.status:
             return payment
-        return self._repository.update_status(payment, data.status)
+        persisted = self._repository.update_status(payment, data.status)
+        if self._notification_publisher is not None:
+            try:
+                self._notification_publisher(persisted.id)
+            except Exception:
+                logger.error(
+                    "Payment notification task publication failed after commit",
+                    extra={"payment_id": persisted.id},
+                )
+        return persisted

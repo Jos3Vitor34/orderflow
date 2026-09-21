@@ -1,3 +1,5 @@
+import logging
+from collections.abc import Callable
 from decimal import Decimal
 
 from app.models.order import Order, OrderStatus
@@ -11,6 +13,7 @@ from app.schemas.order import (
 )
 
 MAX_ORDER_TOTAL = Decimal("9999999999.99")
+logger = logging.getLogger(__name__)
 
 
 class OrderNotFoundError(Exception):
@@ -70,8 +73,14 @@ def validate_order_status_transition(
 
 
 class OrderService:
-    def __init__(self, repository: OrderRepository) -> None:
+    def __init__(
+        self,
+        repository: OrderRepository,
+        *,
+        confirmation_publisher: Callable[[int], object] | None = None,
+    ) -> None:
         self._repository = repository
+        self._confirmation_publisher = confirmation_publisher
 
     @staticmethod
     def _to_response(order: Order) -> OrderResponse:
@@ -158,6 +167,17 @@ class OrderService:
         except Exception:
             self._repository.rollback()
             raise
+        if (
+            self._confirmation_publisher is not None
+            and data.status == OrderStatus.CONFIRMED
+        ):
+            try:
+                self._confirmation_publisher(persisted.id)
+            except Exception:
+                logger.error(
+                    "Order confirmation task publication failed after commit",
+                    extra={"order_id": persisted.id},
+                )
         return self._to_response(persisted)
 
     def _debit_stock_for_confirmation(self, order: Order) -> None:

@@ -31,6 +31,7 @@ from app.services.refund import RefundService
 from app.services.stripe_payment import StripePaymentService
 from app.services.stripe_webhook import StripeWebhookService
 from app.services.webhook_event import WebhookEventService
+from app.tasks import send_order_confirmation, send_payment_notification
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -57,13 +58,19 @@ def get_product_service(
 def get_order_service(
     session: Annotated[Session, Depends(get_db)],
 ) -> OrderService:
-    return OrderService(OrderRepository(session))
+    return OrderService(
+        OrderRepository(session),
+        confirmation_publisher=send_order_confirmation.delay,
+    )
 
 
 def get_payment_service(
     session: Annotated[Session, Depends(get_db)],
 ) -> PaymentService:
-    return PaymentService(PaymentRepository(session))
+    return PaymentService(
+        PaymentRepository(session),
+        notification_publisher=send_payment_notification.delay,
+    )
 
 
 def get_webhook_event_service(

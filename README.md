@@ -412,3 +412,133 @@ RUN_POSTGRES_INTEGRATION_TESTS=1 pytest -m integration
 
 A documentação completa de instalação, execução, API, Docker e decisões
 técnicas será consolidada na fase final.
+
+## Redis, Celery e stack Docker
+
+A stack de desenvolvimento completa possui cinco serviços. `postgres` mantém os
+dados do domínio, `redis` atua como broker e result backend, `migrate` aplica o
+Alembic uma única vez, `api` serve o FastAPI e `worker` executa as tasks Celery.
+API e worker usam a mesma imagem e executam como usuário não-root. A ordem de
+startup é PostgreSQL saudável, migrations concluídas e, então, API e worker; o
+worker também aguarda o Redis ficar saudável.
+
+O projeto usa `celery[redis]>=5.6,<6`. O extra oficial instala Celery, Kombu e o
+cliente Redis compatíveis sem declarar dependências transitivas diretamente. As
+URLs são centralizadas nas seguintes variáveis:
+
+```dotenv
+REDIS_URL=redis://localhost:6379/0
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+CELERY_TASK_ALWAYS_EAGER=false
+CELERY_TASK_EAGER_PROPAGATES=false
+CELERY_LOG_LEVEL=INFO
+```
+
+No Compose, essas URLs usam o hostname `redis`, nunca `localhost`. O banco lógico
+0 transporta mensagens e o banco lógico 1 guarda resultados por até uma hora.
+O Redis local é deliberadamente efêmero, sem volume, RDB ou AOF: reiniciá-lo pode
+perder mensagens enfileiradas e resultados. O volume nomeado `postgres_data`
+continua persistente.
+
+### Tasks disponíveis
+
+- `orderflow.tasks.send_order_confirmation`: recarrega um Order confirmado (ou
+  já avançado), registra a confirmação mockada e ignora o resultado.
+- `orderflow.tasks.send_payment_notification`: recarrega um Payment fora de
+  `pending`, registra a notificação mockada e ignora o resultado.
+- `orderflow.tasks.generate_order_report`: retorna contagens JSON-safe dos
+  Orders por estado, sem criar arquivo e sem alterar o banco.
+
+As mensagens recebem somente IDs inteiros. Cada execução cria e fecha sua própria
+sessão SQLAlchemy, consulta o estado persistido atual e não altera Order, Payment,
+Refund, estoque ou WebhookEvent. As tasks são idempotentes porque seus únicos
+efeitos são leituras e logs. `acks_late` é seguro nesse conjunto específico e
+permite reentrega; por isso a semântica normal é de pelo menos uma vez e logs
+duplicados são possíveis. Uma notificação externa futura exigirá outbox e chave
+idempotente persistente.
+
+Somente `sqlalchemy.exc.OperationalError` recebe retry: três retries além da
+tentativa inicial, backoff exponencial, teto de 60 segundos e jitter. Entidade
+ausente, estado incompatível, payload inválido e erros de programação não são
+repetidos. Não há `sleep`, retry infinito ou captura genérica por `Exception`.
+
+A confirmação de Order é publicada após a primeira transição efetiva
+`processing -> confirmed`. A notificação de Payment é publicada após uma mudança
+efetiva pelo fluxo `PATCH /payments/{id}`. Repetições idempotentes e rollbacks não
+publicam. Os webhooks Stripe preservam sua política de acknowledgement e não
+foram acoplados ao broker nesta fase.
+
+Existe uma janela inevitável entre o commit PostgreSQL e a publicação no Redis.
+Se o broker falhar nessa janela, o estado do domínio permanece commitado, a falha
+é registrada e a resposta não finge que ocorreu rollback. Sem transactional
+outbox, a notificação pode ser perdida; esta é uma limitação deliberada da fase.
+
+### Execução local
+
+Copie `.env.example` para `.env`, substitua `JWT_SECRET_KEY` por um valor local
+único com pelo menos 32 caracteres e mantenha as URLs com `localhost`. Em seguida:
+
+```powershell
+docker compose up -d postgres redis
+alembic upgrade head
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+celery -A app.celery_app:celery_app worker --loglevel=INFO --pool=solo
+```
+
+`--pool=solo` é indicado apenas para desenvolvimento no host Windows. O worker
+do container roda em Linux com o pool padrão do Celery.
+
+### Stack completa
+
+O comando principal faz build, executa migrations e sobe todos os serviços:
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+A API fica em `http://localhost:8000`, com healthcheck público em `/health` e
+OpenAPI em `/openapi.json`. Diagnóstico:
+
+```bash
+docker compose logs api
+docker compose logs worker
+docker compose logs redis
+docker compose logs migrate
+docker compose exec worker celery -A app.celery_app:celery_app inspect ping
+docker compose exec worker celery -A app.celery_app:celery_app inspect registered
+```
+
+Para publicar e recuperar um relatório real:
+
+```bash
+docker compose exec api python -c "from app.tasks import generate_order_report; result = generate_order_report.delay(); print(result.id); print(result.get(timeout=15))"
+```
+
+Para testar uma notificação com um ID que já exista no banco:
+
+```bash
+docker compose exec api celery -A app.celery_app:celery_app call orderflow.tasks.send_order_confirmation --args='[1]'
+docker compose logs worker
+```
+
+Migrations também podem ser executadas explicitamente com
+`docker compose run --rm migrate`. Para encerrar sem apagar dados, use
+`docker compose down` ou `docker compose stop`; ambos preservam
+`postgres_data`. `docker compose down -v` apaga permanentemente os volumes e
+deve ser usado somente quando a destruição dos dados for intencional.
+
+Os testes comuns usam broker `memory://`, backend `cache+memory://`, eager mode e
+propagação de exceptions; portanto, não exigem Redis nem worker. A integração
+PostgreSQL continua opcional com `RUN_POSTGRES_INTEGRATION_TESTS=1`. Nenhum teste
+ou smoke test desta fase faz chamada real à Stripe.
+
+A configuração segue a documentação oficial de
+[tasks do Celery](https://docs.celeryq.dev/en/stable/userguide/tasks.html),
+[configuração do Celery](https://docs.celeryq.dev/en/stable/userguide/configuration.html),
+[Celery com Redis](https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/redis.html),
+[Redis em Docker](https://redis.io/docs/latest/develop/setup/),
+[Docker Compose](https://docs.docker.com/compose/),
+[ordem de startup](https://docs.docker.com/compose/how-tos/startup-order/) e
+[serviços do Compose](https://docs.docker.com/reference/compose-file/services/).
