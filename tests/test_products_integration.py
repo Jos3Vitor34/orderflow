@@ -16,6 +16,7 @@ from app.models.customer import Customer
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.product import Product
+from tests.integration_helpers import create_test_user
 
 
 @pytest.mark.integration
@@ -47,16 +48,12 @@ def test_complete_product_crud_and_decimal_precision_against_postgresql() -> Non
 
         app.dependency_overrides[get_db] = override_get_db
         try:
+            create_test_user(
+                schema_connection,
+                full_name="Product Manager",
+                email="products@example.com",
+            )
             with TestClient(app) as client:
-                register_response = client.post(
-                    "/api/v1/auth/register",
-                    json={
-                        "full_name": "Product Manager",
-                        "email": "products@example.com",
-                        "password": "strong-password",
-                    },
-                )
-                assert register_response.status_code == 201
                 login_response = client.post(
                     "/api/v1/auth/login",
                     data={

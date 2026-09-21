@@ -3,9 +3,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from app.api.dependencies import (
-    get_current_user,
     get_payment_service,
     get_stripe_payment_service,
+    require_operator,
+    require_viewer,
 )
 from app.integrations.stripe import (
     StripeAuthenticationError,
@@ -51,7 +52,6 @@ from app.services.stripe_payment import (
 router = APIRouter(
     prefix="/payments",
     tags=["payments"],
-    dependencies=[Depends(get_current_user)],
 )
 
 UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
@@ -64,6 +64,7 @@ CONFLICT_RESPONSE = {409: {"description": "Payment conflicts with resource state
     response_model=PaymentResponse,
     status_code=status.HTTP_201_CREATED,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE | CONFLICT_RESPONSE,
+    dependencies=[Depends(require_operator)],
 )
 def create_payment(
     data: PaymentCreate,
@@ -110,6 +111,7 @@ def create_payment(
         502: {"description": "Stripe rejected or returned an invalid response"},
         503: {"description": "Stripe configuration or connectivity unavailable"},
     },
+    dependencies=[Depends(require_operator)],
 )
 def create_stripe_payment(
     data: StripePaymentCreate,
@@ -187,7 +189,12 @@ def create_stripe_payment(
     )
 
 
-@router.get("", response_model=PaymentListResponse, responses=UNAUTHORIZED_RESPONSE)
+@router.get(
+    "",
+    response_model=PaymentListResponse,
+    responses=UNAUTHORIZED_RESPONSE,
+    dependencies=[Depends(require_viewer)],
+)
 def list_payments(
     service: Annotated[PaymentService, Depends(get_payment_service)],
     page: Annotated[int, Query(ge=1)] = 1,
@@ -200,6 +207,7 @@ def list_payments(
     "/{payment_id}",
     response_model=PaymentResponse,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE,
+    dependencies=[Depends(require_viewer)],
 )
 def get_payment(
     payment_id: int,
@@ -218,6 +226,7 @@ def get_payment(
     "/{payment_id}",
     response_model=PaymentResponse,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE | CONFLICT_RESPONSE,
+    dependencies=[Depends(require_operator)],
 )
 def update_payment(
     payment_id: int,

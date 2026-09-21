@@ -30,6 +30,7 @@ from app.repositories.webhook_event import (
     WebhookEventRepository,
 )
 from app.services.stripe_webhook import StripeWebhookService
+from tests.integration_helpers import create_test_user
 
 WEBHOOK_SECRET = "whsec_phase13_postgres_test_only"
 
@@ -102,16 +103,12 @@ def test_stripe_webhook_atomicity_concurrency_and_public_integrity() -> None:
         app.dependency_overrides[get_db] = override_get_db
         app.dependency_overrides[get_stripe_webhook_verifier] = lambda: verifier
         try:
+            create_test_user(
+                schema_connection,
+                full_name="Stripe Webhook Tester",
+                email="stripe-webhooks@example.com",
+            )
             with TestClient(app) as client:
-                register = client.post(
-                    "/api/v1/auth/register",
-                    json={
-                        "full_name": "Stripe Webhook Tester",
-                        "email": "stripe-webhooks@example.com",
-                        "password": "strong-password",
-                    },
-                )
-                assert register.status_code == 201
                 login = client.post(
                     "/api/v1/auth/login",
                     data={

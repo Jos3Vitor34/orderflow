@@ -29,6 +29,7 @@ from app.services.stripe_payment import (
     StripePaymentService,
     build_stripe_idempotency_key,
 )
+from tests.integration_helpers import create_test_user
 
 
 class ConcurrentFakeStripeGateway:
@@ -114,16 +115,12 @@ def test_stripe_payment_flow_and_concurrency_against_postgresql() -> None:
         app.dependency_overrides[get_db] = override_get_db
         app.dependency_overrides[get_stripe_gateway] = lambda: gateway
         try:
+            create_test_user(
+                schema_connection,
+                full_name="Stripe Tester",
+                email="stripe-integration@example.com",
+            )
             with TestClient(app) as client:
-                register_response = client.post(
-                    "/api/v1/auth/register",
-                    json={
-                        "full_name": "Stripe Tester",
-                        "email": "stripe-integration@example.com",
-                        "password": "strong-password",
-                    },
-                )
-                assert register_response.status_code == 201
                 login_response = client.post(
                     "/api/v1/auth/login",
                     data={

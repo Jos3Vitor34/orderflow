@@ -10,7 +10,7 @@ from app.main import app
 from app.models.order import Order, OrderStatus
 from app.models.payment import Payment, PaymentStatus
 from app.models.product import Product
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.webhook_event import WebhookEvent
 from app.repositories.webhook_event import WebhookEventConstraintError
 from app.services.webhook_event import WebhookEventService
@@ -142,6 +142,7 @@ def webhook_context() -> Generator[
         full_name="Authenticated User",
         email="user@example.com",
         hashed_password="not-used",
+        role=UserRole.ADMIN,
         is_active=True,
         created_at=now,
         updated_at=now,

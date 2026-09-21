@@ -1,18 +1,16 @@
 # OrderFlow API
 
 Backend para gerenciamento de pedidos e automações, desenvolvido de forma
-incremental com Python, FastAPI, PostgreSQL e SQLAlchemy. Redis e Celery estão
-planejados no roadmap, mas ainda não foram implementados.
+incremental com Python, FastAPI, PostgreSQL, SQLAlchemy, Redis e Celery.
 
 ## Estado do projeto
 
-A Fase 14 adiciona refunds Stripe totais e parciais como entidades financeiras
-próprias, com idempotência, concorrência protegida no PostgreSQL e sincronização
-por webhooks assinados. A Fase 15 preserva essa baseline e registra a auditoria
-de escopo, as pendências reais e o roadmap finito em
-[`docs/SCOPE_AUDIT_PHASE_15.md`](docs/SCOPE_AUDIT_PHASE_15.md). O receptor
-provider-agnostic da Fase 11, a criação de Payment Intents da Fase 12 e os
-webhooks de Payment da Fase 13 permanecem disponíveis.
+A Fase 18 adiciona RBAC (`ADMIN`, `OPERATOR` e `VIEWER`), administração segura
+de usuários, logs estruturados, correlation ID HTTP/Celery, liveness, readiness
+e estatísticas agregadas. Permanecem disponíveis os fluxos anteriores de
+Orders, Payments, Refunds, webhooks Stripe e tasks resilientes. Não há cadastro
+público, refresh token, chamadas Stripe reais nos testes nem plataforma externa
+de observabilidade.
 
 ## Requisitos
 
@@ -24,9 +22,9 @@ webhooks de Payment da Fase 13 permanecem disponíveis.
 
 Crie e ative um ambiente virtual e instale as dependências de desenvolvimento:
 
-```bash
+```powershell
 python -m venv .venv
-python -m pip install --group dev
+.\.venv\Scripts\python.exe -m pip install --group dev
 ```
 
 Copie `.env.example` para `.env` e substitua `JWT_SECRET_KEY` por um segredo
@@ -78,26 +76,144 @@ alembic current
 alembic check
 ```
 
-Reverta todas as migrations com `alembic downgrade base`.
+Use downgrade somente em banco descartável: `alembic downgrade base` é
+destrutivo para os dados das tabelas removidas.
 
 ## Execução
 
-```bash
-uvicorn app.main:app --reload
+```powershell
+.\.venv\Scripts\python.exe -m app.server
 ```
 
-O health check está disponível em `GET /health`. A documentação interativa
-gerada pelo FastAPI está disponível em `/docs` e `/redoc`.
+Para reload local, `uvicorn app.main:app --reload` continua possível. O launcher
+`app.server` desabilita o access log duplicado do Uvicorn e usa a configuração
+estruturada da aplicação. Swagger e ReDoc ficam em `/docs` e `/redoc`.
 
-## Autenticação
+## Autenticação, usuários e autorização
 
-- `POST /api/v1/auth/register`: recebe JSON com `full_name`, `email` e `password`.
-- `POST /api/v1/auth/login`: recebe formulário OAuth2 com `username` (e-mail) e
-  `password`, e retorna um Bearer access token.
-- `GET /api/v1/auth/me`: exige `Authorization: Bearer <token>` e retorna somente
-  os dados públicos do usuário atual.
+Não existe cadastro público. `POST /api/v1/auth/login` recebe formulário OAuth2
+com `username` (e-mail) e `password`; `GET /api/v1/auth/me` retorna somente os
+dados públicos do usuário autenticado. Senhas usam Argon2 pela configuração
+recomendada do `pwdlib` e jamais são retornadas. O JWT assinado contém apenas
+`sub`, `role`, `type`, `iat` e `exp`; algoritmo e duração são definidos por
+`JWT_ALGORITHM` e `ACCESS_TOKEN_EXPIRE_MINUTES` (30 minutos por padrão). A role
+do token deve coincidir com a role atual persistida, portanto uma alteração de
+papel invalida tokens antigos. Não há refresh token nesta fase.
 
-Não há refresh token nesta fase.
+Crie o primeiro administrador após `alembic upgrade head`. O prompt não ecoa a
+senha:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.cli bootstrap-admin `
+  --email admin@example.com --full-name "Local Admin"
+```
+
+No Docker:
+
+```bash
+docker compose run --rm api python -m app.cli bootstrap-admin \
+  --email admin@example.com --full-name "Local Admin"
+```
+
+Em automação não interativa, defina temporariamente
+`ORDERFLOW_ADMIN_PASSWORD`; a variável fica vazia no `.env.example`, não deve
+ser persistida e nunca é registrada. E-mail duplicado é recusado.
+
+```powershell
+$env:ORDERFLOW_ADMIN_PASSWORD = "replace-this-temporary-password"
+.\.venv\Scripts\python.exe -m app.cli bootstrap-admin `
+  --email admin@example.com --full-name "Local Admin"
+Remove-Item Env:ORDERFLOW_ADMIN_PASSWORD
+```
+
+Depois do bootstrap, somente `ADMIN` pode usar:
+
+- `POST /api/v1/users`;
+- `GET /api/v1/users` e `GET /api/v1/users/{id}`;
+- `PATCH /api/v1/users/{id}/role`;
+- `PATCH /api/v1/users/{id}/active`.
+
+Não há exclusão física. O serviço bloqueia os administradores ativos antes de
+uma desativação/rebaixamento e impede que o último `ADMIN` ativo seja removido.
+
+Exemplo de login e uso do token (valores fictícios):
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'username=admin@example.com' \
+  --data-urlencode 'password=replace-this-local-password'
+
+curl -s http://localhost:8000/api/v1/orders \
+  -H 'Authorization: Bearer <access-token>'
+```
+
+### Matriz de permissões
+
+| Operação | VIEWER | OPERATOR | ADMIN |
+| --- | :---: | :---: | :---: |
+| Consultar Customers, Products, Orders, Payments, Refunds e eventos | Sim | Sim | Sim |
+| Consultar estatísticas | Sim | Sim | Sim |
+| Criar/alterar recursos operacionais e estados | Não | Sim | Sim |
+| Excluir Customers ou Products | Não | Não | Sim |
+| Administrar usuários | Não | Não | Sim |
+| Login, liveness e readiness | Público | Público | Público |
+| Webhook Stripe | `Stripe-Signature` | `Stripe-Signature` | `Stripe-Signature` |
+
+O receptor provider-agnostic legado também permanece público, conforme seu
+contrato existente; ele não substitui o endpoint Stripe assinado. Uma ausência
+ou falha de autenticação retorna `401` com `WWW-Authenticate: Bearer`; um usuário
+válido sem a role necessária recebe `403`.
+
+## Logs estruturados e correlation ID
+
+API e worker escrevem um evento JSON por linha, configurado por `LOG_LEVEL`,
+`LOG_FORMAT`, `SERVICE_NAME` e `ENVIRONMENT`. Em JSON, os campos incluem
+`timestamp` UTC, `level`, `logger`, `message`, serviço, ambiente e, quando
+aplicável, `correlation_id`, método, path sem query string, status, duração,
+task ID, task name, tentativa e tipo/traceback sanitizado da exceção.
+
+Chaves e conteúdo sensível são redigidos defensivamente: Authorization/JWT,
+cookies, senha/hash, segredos, assinaturas/API keys Stripe e credenciais em URLs.
+Respostas `500` não expõem traceback. `LOG_FORMAT=text` existe apenas para
+desenvolvimento; JSON é o padrão.
+
+O middleware aceita `X-Correlation-ID` somente com até
+`CORRELATION_ID_MAX_LENGTH` (128 por padrão) e caracteres alfanuméricos,
+`.`, `_`, `:`, `-`. Valor ausente ou inválido é substituído por UUID e toda
+resposta, inclusive erro tratável, recebe o header. O contexto usa
+`contextvars` e é limpo ao final. Publicações Celery levam o mesmo ID em headers,
+sem alterar os argumentos de negócio; tasks manuais ganham um UUID próprio e
+retries preservam o ID original.
+
+## Liveness e readiness
+
+- `GET /health` preserva o contrato histórico `{"status":"ok"}`;
+- `GET /health/live` apenas confirma que o processo HTTP responde;
+- `GET /health/ready` executa `SELECT 1` no PostgreSQL e `PING` no Redis.
+
+Readiness usa `READINESS_TIMEOUT_SECONDS` (2 segundos por padrão), fecha sessão e
+cliente, retorna `200` quando ambos estão disponíveis e `503` com estados seguros
+por componente em caso contrário. Não consulta Stripe nem inspeciona workers.
+O healthcheck do container usa liveness para evitar reinício em cascata durante
+uma falha transitória de dependência; readiness é o sinal correto para retirar a
+instância do tráfego. Readiness não garante entrega transacional das tasks.
+
+## Estatísticas
+
+`GET /api/v1/statistics/overview` aceita todas as roles autenticadas. Os query
+params opcionais `start` e `end` exigem timezone, são normalizados para UTC e
+formam o intervalo semiaberto `[start, end)`. Todas as métricas usam a mesma
+janela; sem filtros, representam todo o histórico.
+
+As queries usam `COUNT`, `SUM`, `AVG` e `GROUP BY` no PostgreSQL, sem carregar
+entidades. O retorno contém Orders totais/por status, valor total, ticket médio,
+criados na janela e visão operacional; Payments totais/por status, volume bruto
+processado, volume bruto bem-sucedido, quantidade bem-sucedida e taxa percentual
+de sucesso. `approved`, `partially_refunded` e `refunded` contam como tentativas
+bem-sucedidas; o denominador exclui `pending` e inclui bem-sucedidas + `failed`.
+O volume é bruto e não representa receita líquida após refunds. Valores usam
+`Decimal`, nunca `float`, e status ausentes retornam zero.
 
 ## Customers
 
@@ -422,9 +538,9 @@ API e worker usam a mesma imagem e executam como usuário não-root. A ordem de
 startup é PostgreSQL saudável, migrations concluídas e, então, API e worker; o
 worker também aguarda o Redis ficar saudável.
 
-O projeto usa `celery[redis]>=5.6,<6`. O extra oficial instala Celery, Kombu e o
-cliente Redis compatíveis sem declarar dependências transitivas diretamente. As
-URLs são centralizadas nas seguintes variáveis:
+O projeto usa `celery[redis]>=5.6,<6` e declara também `redis>=6.4,<7`
+diretamente, pois a própria API importa o cliente para readiness. As URLs e a
+observabilidade são centralizadas nas seguintes variáveis:
 
 ```dotenv
 REDIS_URL=redis://localhost:6379/0
@@ -433,6 +549,12 @@ CELERY_RESULT_BACKEND=redis://localhost:6379/1
 CELERY_TASK_ALWAYS_EAGER=false
 CELERY_TASK_EAGER_PROPAGATES=false
 CELERY_LOG_LEVEL=INFO
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+SERVICE_NAME=orderflow-api
+ENVIRONMENT=development
+CORRELATION_ID_MAX_LENGTH=128
+READINESS_TIMEOUT_SECONDS=2
 ```
 
 No Compose, essas URLs usam o hostname `redis`, nunca `localhost`. O banco lógico
@@ -498,8 +620,8 @@ docker compose up -d --build
 docker compose ps
 ```
 
-A API fica em `http://localhost:8000`, com healthcheck público em `/health` e
-OpenAPI em `/openapi.json`. Diagnóstico:
+A API fica em `http://localhost:8000`, com liveness público em `/health/live`,
+readiness em `/health/ready` e OpenAPI em `/openapi.json`. Diagnóstico:
 
 ```bash
 docker compose logs api
@@ -533,6 +655,20 @@ Os testes comuns usam broker `memory://`, backend `cache+memory://`, eager mode 
 propagação de exceptions; portanto, não exigem Redis nem worker. A integração
 PostgreSQL continua opcional com `RUN_POSTGRES_INTEGRATION_TESTS=1`. Nenhum teste
 ou smoke test desta fase faz chamada real à Stripe.
+
+Falhas comuns: `401` indica token ausente/inválido/inativo ou role do token
+desatualizada; `403` indica role insuficiente; `503` em readiness identifica o
+componente indisponível sem revelar DSN; falha de bootstrap por duplicidade
+significa que o e-mail já existe. Confira `docker compose logs api worker
+migrate`, sem copiar tokens ou segredos para tickets.
+
+Limitações deliberadas: não há refresh token, recuperação de senha, OAuth
+social, rate limit distribuído, Prometheus/Grafana/Loki/ELK/OpenTelemetry,
+providers reais para notificações ou outbox transacional. Logs JSON não
+substituem uma plataforma completa de observabilidade. Continua existindo a
+janela entre commit do domínio e publicação no broker; sem outbox, uma task pode
+não ser publicada embora o commit tenha sido concluído. CI, type checking e
+deploy permanecem para a Fase 19.
 
 A configuração segue a documentação oficial de
 [tasks do Celery](https://docs.celeryq.dev/en/stable/userguide/tasks.html),

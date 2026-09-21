@@ -1,9 +1,16 @@
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Identity, String, func, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Identity, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+
+class UserRole(StrEnum):
+    ADMIN = "admin"
+    OPERATOR = "operator"
+    VIEWER = "viewer"
 
 
 class User(Base):
@@ -13,6 +20,16 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(320), unique=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
+    role: Mapped[UserRole] = mapped_column(
+        Enum(
+            UserRole,
+            name="user_role",
+            values_callable=lambda members: [member.value for member in members],
+        ),
+        default=UserRole.VIEWER,
+        server_default=UserRole.VIEWER.value,
+        index=True,
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,

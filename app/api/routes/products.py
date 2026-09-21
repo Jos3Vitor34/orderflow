@@ -2,7 +2,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.api.dependencies import get_current_user, get_product_service
+from app.api.dependencies import (
+    get_product_service,
+    require_admin,
+    require_operator,
+    require_viewer,
+)
 from app.models.product import Product
 from app.repositories.product import (
     DuplicateProductSkuError,
@@ -20,7 +25,6 @@ from app.services.product import ProductNotFoundError, ProductService
 router = APIRouter(
     prefix="/products",
     tags=["products"],
-    dependencies=[Depends(get_current_user)],
 )
 
 UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
@@ -57,6 +61,7 @@ def constraint_response() -> HTTPException:
     response_model=ProductResponse,
     status_code=status.HTTP_201_CREATED,
     responses=UNAUTHORIZED_RESPONSE | SKU_CONFLICT_RESPONSE,
+    dependencies=[Depends(require_operator)],
 )
 def create_product(
     data: ProductCreate,
@@ -70,7 +75,12 @@ def create_product(
         raise constraint_response() from exc
 
 
-@router.get("", response_model=ProductListResponse, responses=UNAUTHORIZED_RESPONSE)
+@router.get(
+    "",
+    response_model=ProductListResponse,
+    responses=UNAUTHORIZED_RESPONSE,
+    dependencies=[Depends(require_viewer)],
+)
 def list_products(
     service: Annotated[ProductService, Depends(get_product_service)],
     page: Annotated[int, Query(ge=1)] = 1,
@@ -83,6 +93,7 @@ def list_products(
     "/{product_id}",
     response_model=ProductResponse,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE,
+    dependencies=[Depends(require_viewer)],
 )
 def get_product(
     product_id: int,
@@ -98,6 +109,7 @@ def get_product(
     "/{product_id}",
     response_model=ProductResponse,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE | SKU_CONFLICT_RESPONSE,
+    dependencies=[Depends(require_operator)],
 )
 def update_product(
     product_id: int,
@@ -118,6 +130,7 @@ def update_product(
     "/{product_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE | DELETE_CONFLICT_RESPONSE,
+    dependencies=[Depends(require_admin)],
 )
 def delete_product(
     product_id: int,

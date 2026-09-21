@@ -24,6 +24,7 @@ from app.repositories.webhook_event import (
 )
 from app.schemas.webhook_event import WebhookEventCreate
 from app.services.webhook_event import WebhookEventService
+from tests.integration_helpers import create_test_user
 
 
 @pytest.mark.integration
@@ -64,16 +65,12 @@ def test_complete_webhook_flow_and_concurrency_against_postgresql() -> None:
 
         app.dependency_overrides[get_db] = override_get_db
         try:
+            create_test_user(
+                schema_connection,
+                full_name="Webhook Auditor",
+                email="webhooks@example.com",
+            )
             with TestClient(app) as client:
-                register_response = client.post(
-                    "/api/v1/auth/register",
-                    json={
-                        "full_name": "Webhook Auditor",
-                        "email": "webhooks@example.com",
-                        "password": "strong-password",
-                    },
-                )
-                assert register_response.status_code == 201
                 login_response = client.post(
                     "/api/v1/auth/login",
                     data={

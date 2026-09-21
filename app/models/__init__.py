@@ -4,7 +4,7 @@ from app.models.order_item import OrderItem
 from app.models.payment import Payment, PaymentStatus
 from app.models.product import Product
 from app.models.refund import Refund, RefundStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.webhook_event import WebhookEvent
 
 __all__ = [
@@ -18,5 +18,6 @@ __all__ = [
     "Refund",
     "RefundStatus",
     "User",
+    "UserRole",
     "WebhookEvent",
 ]

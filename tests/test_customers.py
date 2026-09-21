@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import get_current_user, get_customer_service
 from app.main import app
 from app.models.customer import Customer
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.customer import DuplicateCustomerEmailError
 from app.services.customer import CustomerService
 
@@ -72,6 +72,7 @@ def customer_context() -> Generator[tuple[TestClient, InMemoryCustomerRepository
         full_name="Authenticated User",
         email="user@example.com",
         hashed_password="not-used",
+        role=UserRole.ADMIN,
         is_active=True,
         created_at=now,
         updated_at=now,

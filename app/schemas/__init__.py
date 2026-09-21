@@ -1,4 +1,4 @@
-from app.schemas.auth import AccessToken, UserPublic, UserRegister
+from app.schemas.auth import AccessToken
 from app.schemas.customer import (
     CustomerCreate,
     CustomerListResponse,
@@ -19,6 +19,7 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate,
 )
+from app.schemas.user import UserCreate, UserPublic
 
 __all__ = [
     "AccessToken",
@@ -37,5 +38,5 @@ __all__ = [
     "ProductResponse",
     "ProductUpdate",
     "UserPublic",
-    "UserRegister",
+    "UserCreate",
 ]

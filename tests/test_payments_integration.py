@@ -19,6 +19,7 @@ from app.repositories.payment import (
     DuplicatePaymentReferenceError,
     PaymentRepository,
 )
+from tests.integration_helpers import create_test_user
 
 
 @pytest.mark.integration
@@ -50,16 +51,12 @@ def test_complete_payment_flow_integrity_against_postgresql() -> None:
 
         app.dependency_overrides[get_db] = override_get_db
         try:
+            create_test_user(
+                schema_connection,
+                full_name="Payment Manager",
+                email="payments@example.com",
+            )
             with TestClient(app) as client:
-                register_response = client.post(
-                    "/api/v1/auth/register",
-                    json={
-                        "full_name": "Payment Manager",
-                        "email": "payments@example.com",
-                        "password": "strong-password",
-                    },
-                )
-                assert register_response.status_code == 201
                 login_response = client.post(
                     "/api/v1/auth/login",
                     data={

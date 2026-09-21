@@ -2,7 +2,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.api.dependencies import get_current_user, get_customer_service
+from app.api.dependencies import (
+    get_customer_service,
+    require_admin,
+    require_operator,
+    require_viewer,
+)
 from app.models.customer import Customer
 from app.repositories.customer import (
     CustomerDeleteConflictError,
@@ -19,7 +24,6 @@ from app.services.customer import CustomerNotFoundError, CustomerService
 router = APIRouter(
     prefix="/customers",
     tags=["customers"],
-    dependencies=[Depends(get_current_user)],
 )
 
 UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
@@ -49,6 +53,7 @@ def duplicate_email_response() -> HTTPException:
     response_model=CustomerResponse,
     status_code=status.HTTP_201_CREATED,
     responses=UNAUTHORIZED_RESPONSE | EMAIL_CONFLICT_RESPONSE,
+    dependencies=[Depends(require_operator)],
 )
 def create_customer(
     data: CustomerCreate,
@@ -64,6 +69,7 @@ def create_customer(
     "",
     response_model=CustomerListResponse,
     responses=UNAUTHORIZED_RESPONSE,
+    dependencies=[Depends(require_viewer)],
 )
 def list_customers(
     service: Annotated[CustomerService, Depends(get_customer_service)],
@@ -77,6 +83,7 @@ def list_customers(
     "/{customer_id}",
     response_model=CustomerResponse,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE,
+    dependencies=[Depends(require_viewer)],
 )
 def get_customer(
     customer_id: int,
@@ -92,6 +99,7 @@ def get_customer(
     "/{customer_id}",
     response_model=CustomerResponse,
     responses=(UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE | EMAIL_CONFLICT_RESPONSE),
+    dependencies=[Depends(require_operator)],
 )
 def update_customer(
     customer_id: int,
@@ -110,6 +118,7 @@ def update_customer(
     "/{customer_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE | DELETE_CONFLICT_RESPONSE,
+    dependencies=[Depends(require_admin)],
 )
 def delete_customer(
     customer_id: int,

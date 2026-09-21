@@ -11,7 +11,7 @@ from app.models.customer import Customer
 from app.models.order import Order, OrderStatus
 from app.models.order_item import OrderItem
 from app.models.product import Product
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.order import OrderPersistenceError
 from app.services.order import (
     InvalidOrderStatusTransitionError,
@@ -160,6 +160,7 @@ def order_context() -> Generator[tuple[TestClient, InMemoryOrderRepository]]:
         full_name="Authenticated User",
         email="user@example.com",
         hashed_password="not-used",
+        role=UserRole.ADMIN,
         is_active=True,
         created_at=now,
         updated_at=now,

@@ -9,7 +9,7 @@ from app.api.dependencies import get_current_user, get_payment_service
 from app.main import app
 from app.models.order import Order, OrderStatus
 from app.models.payment import Payment, PaymentStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.payment import (
     DuplicatePaymentReferenceError,
     PaymentConstraintError,
@@ -112,6 +112,7 @@ def payment_context() -> Generator[tuple[TestClient, InMemoryPaymentRepository]]
         full_name="Authenticated User",
         email="user@example.com",
         hashed_password="not-used",
+        role=UserRole.ADMIN,
         is_active=True,
         created_at=now,
         updated_at=now,

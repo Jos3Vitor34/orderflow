@@ -5,9 +5,8 @@ from pwdlib import PasswordHash
 from pwdlib.exceptions import PwdlibError
 
 from app.core.config import Settings
-from app.models.user import User
-from app.repositories.user import DuplicateEmailError, UserRepository
-from app.schemas.auth import UserRegister
+from app.models.user import User, UserRole
+from app.repositories.user import UserRepository
 
 password_hash = PasswordHash.recommended()
 dummy_password_hash = password_hash.hash("timing-only-password")
@@ -25,17 +24,6 @@ class AuthService:
     @staticmethod
     def normalize_email(email: str) -> str:
         return email.strip().lower()
-
-    def register(self, data: UserRegister) -> User:
-        email = self.normalize_email(str(data.email))
-        if self._repository.get_by_email(email) is not None:
-            raise DuplicateEmailError
-
-        return self._repository.create(
-            full_name=data.full_name,
-            email=email,
-            hashed_password=password_hash.hash(data.password),
-        )
 
     def authenticate(self, email: str, password: str) -> User | None:
         user = self._repository.get_by_email(self.normalize_email(email))
@@ -56,6 +44,7 @@ class AuthService:
         return jwt.encode(
             {
                 "sub": str(user.id),
+                "role": user.role.value,
                 "type": "access",
                 "iat": now,
                 "exp": expires_at,
@@ -70,17 +59,22 @@ class AuthService:
                 token,
                 self._settings.jwt_secret_key.get_secret_value(),
                 algorithms=[self._settings.jwt_algorithm],
-                options={"require": ["sub", "type", "iat", "exp"]},
+                options={"require": ["sub", "role", "type", "iat", "exp"]},
             )
             if payload["type"] != "access":
                 raise InvalidTokenError
             user_id = int(payload["sub"])
             if user_id <= 0:
                 raise InvalidTokenError
+            token_role = UserRole(payload["role"])
         except (jwt.InvalidTokenError, KeyError, TypeError, ValueError) as exc:
             raise InvalidTokenError from exc
 
         user = self._repository.get_by_id(user_id)
-        if user is None or not user.is_active:
+        if user is None or not user.is_active or user.role != token_role:
             raise InvalidTokenError
         return user
+
+
+def hash_password(password: str) -> str:
+    return password_hash.hash(password)

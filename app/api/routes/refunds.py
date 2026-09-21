@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
-from app.api.dependencies import get_current_user, get_refund_service
+from app.api.dependencies import get_refund_service, require_operator, require_viewer
 from app.integrations.stripe import (
     StripeAuthenticationError,
     StripeConfigurationError,
@@ -35,12 +35,10 @@ from app.services.refund import (
 payments_refunds_router = APIRouter(
     prefix="/payments",
     tags=["refunds"],
-    dependencies=[Depends(get_current_user)],
 )
 refunds_router = APIRouter(
     prefix="/refunds",
     tags=["refunds"],
-    dependencies=[Depends(get_current_user)],
 )
 
 UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
@@ -58,6 +56,7 @@ UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
         502: {"description": "Stripe rejected or returned an invalid response"},
         503: {"description": "Stripe or local persistence temporarily unavailable"},
     },
+    dependencies=[Depends(require_operator)],
 )
 def create_refund(
     payment_id: int,
@@ -142,6 +141,7 @@ def create_refund(
     "/{payment_id}/refunds",
     response_model=RefundListResponse,
     responses=UNAUTHORIZED_RESPONSE | {404: {"description": "Payment not found"}},
+    dependencies=[Depends(require_viewer)],
 )
 def list_refunds(
     payment_id: int,
@@ -163,6 +163,7 @@ def list_refunds(
     "/{refund_id}",
     response_model=RefundResponse,
     responses=UNAUTHORIZED_RESPONSE | {404: {"description": "Refund not found"}},
+    dependencies=[Depends(require_viewer)],
 )
 def get_refund(
     refund_id: int,

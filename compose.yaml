@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: orderflow-api:phase17
+    image: orderflow-api:phase18
     command: ["alembic", "upgrade", "head"]
     environment: &app-environment
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-orderflow}:${POSTGRES_PASSWORD:-orderflow_password}@postgres:5432/${POSTGRES_DB:-orderflow}
@@ -45,6 +45,12 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-docker-only-secret-change-before-use}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      SERVICE_NAME: ${SERVICE_NAME:-orderflow-api}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORRELATION_ID_MAX_LENGTH: ${CORRELATION_ID_MAX_LENGTH:-128}
+      READINESS_TIMEOUT_SECONDS: ${READINESS_TIMEOUT_SECONDS:-2}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_CURRENCY: ${STRIPE_CURRENCY:-brl}
@@ -56,8 +62,8 @@ services:
   api:
     build:
       context: .
-    image: orderflow-api:phase17
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    image: orderflow-api:phase18
+    command: ["python", "-m", "app.server"]
     environment: *app-environment
     ports:
       - "${API_PORT:-8000}:8000"
@@ -71,7 +77,7 @@ services:
         - CMD
         - python
         - -c
-        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=3)
       interval: 10s
       timeout: 5s
       retries: 10
@@ -79,7 +85,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: orderflow-api:phase17
+    image: orderflow-api:phase18
     command:
       - celery
       - -A

@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.dependencies import get_current_user, get_order_service
+from app.api.dependencies import get_order_service, require_operator, require_viewer
 from app.repositories.order import OrderPersistenceError
 from app.schemas.order import (
     OrderCreate,
@@ -26,7 +26,6 @@ from app.services.order import (
 router = APIRouter(
     prefix="/orders",
     tags=["orders"],
-    dependencies=[Depends(get_current_user)],
 )
 
 UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
@@ -47,6 +46,7 @@ def conflict_response(detail: str) -> HTTPException:
     response_model=OrderResponse,
     status_code=status.HTTP_201_CREATED,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE | CONFLICT_RESPONSE,
+    dependencies=[Depends(require_operator)],
 )
 def create_order(
     data: OrderCreate,
@@ -71,7 +71,12 @@ def create_order(
         ) from exc
 
 
-@router.get("", response_model=OrderListResponse, responses=UNAUTHORIZED_RESPONSE)
+@router.get(
+    "",
+    response_model=OrderListResponse,
+    responses=UNAUTHORIZED_RESPONSE,
+    dependencies=[Depends(require_viewer)],
+)
 def list_orders(
     service: Annotated[OrderService, Depends(get_order_service)],
     page: Annotated[int, Query(ge=1)] = 1,
@@ -84,6 +89,7 @@ def list_orders(
     "/{order_id}",
     response_model=OrderResponse,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE,
+    dependencies=[Depends(require_viewer)],
 )
 def get_order(
     order_id: int,
@@ -99,6 +105,7 @@ def get_order(
     "/{order_id}",
     response_model=OrderResponse,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE | CONFLICT_RESPONSE,
+    dependencies=[Depends(require_operator)],
 )
 def update_order(
     order_id: int,

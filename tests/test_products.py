@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import get_current_user, get_product_service
 from app.main import app
 from app.models.product import Product
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.product import DuplicateProductSkuError
 from app.services.product import ProductService
 
@@ -83,6 +83,7 @@ def product_context() -> Generator[tuple[TestClient, InMemoryProductRepository]]
         full_name="Authenticated User",
         email="user@example.com",
         hashed_password="not-used",
+        role=UserRole.ADMIN,
         is_active=True,
         created_at=now,
         updated_at=now,

@@ -12,6 +12,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 from app.db.session import engine, get_db
 from app.main import app
 from app.models.user import User
+from tests.integration_helpers import create_test_user
 
 
 @pytest.mark.integration
@@ -19,8 +20,8 @@ from app.models.user import User
     os.getenv("RUN_POSTGRES_INTEGRATION_TESTS") != "1",
     reason="set RUN_POSTGRES_INTEGRATION_TESTS=1 to test PostgreSQL",
 )
-def test_complete_auth_flow_against_postgresql() -> None:
-    schema_name = f"phase6_auth_{uuid4().hex}"
+def test_complete_auth_and_authorization_flow_against_postgresql() -> None:
+    schema_name = f"phase18_auth_{uuid4().hex}"
 
     with engine.connect() as connection:
         connection.execute(CreateSchema(schema_name))
@@ -33,57 +34,91 @@ def test_complete_auth_flow_against_postgresql() -> None:
             with Session(bind=connection, expire_on_commit=False) as session:
                 yield session
 
+        create_test_user(
+            connection,
+            full_name="PostgreSQL Admin",
+            email="postgres@example.com",
+        )
         app.dependency_overrides[get_db] = override_get_db
         try:
             with TestClient(app) as client:
-                register_response = client.post(
+                public_signup = client.post(
                     "/api/v1/auth/register",
                     json={
-                        "full_name": "PostgreSQL User",
-                        "email": "POSTGRES@example.com",
+                        "full_name": "Public",
+                        "email": "public@example.com",
                         "password": "strong-password",
                     },
                 )
-                assert register_response.status_code == 201
-                assert register_response.json()["email"] == "postgres@example.com"
-                assert "hashed_password" not in register_response.json()
-
-                duplicate_response = client.post(
-                    "/api/v1/auth/register",
-                    json={
-                        "full_name": "Duplicate",
-                        "email": "postgres@EXAMPLE.com",
-                        "password": "another-password",
-                    },
-                )
-                assert duplicate_response.status_code == 409
-
-                with Session(bind=connection) as inspection_session:
-                    saved_user = inspection_session.scalar(select(User))
-                    assert saved_user is not None
-                    assert saved_user.hashed_password != "strong-password"
-                    assert PasswordHash.recommended().verify(
-                        "strong-password",
-                        saved_user.hashed_password,
-                    )
+                assert public_signup.status_code == 404
 
                 login_response = client.post(
                     "/api/v1/auth/login",
                     data={
-                        "username": "postgres@example.com",
+                        "username": "POSTGRES@example.com",
                         "password": "strong-password",
                     },
                 )
                 assert login_response.status_code == 200
-                token = login_response.json()["access_token"]
+                admin_headers = {
+                    "Authorization": f"Bearer {login_response.json()['access_token']}"
+                }
 
-                me_response = client.get(
-                    "/api/v1/auth/me",
-                    headers={"Authorization": f"Bearer {token}"},
+                created = client.post(
+                    "/api/v1/users",
+                    headers=admin_headers,
+                    json={
+                        "full_name": "PostgreSQL Viewer",
+                        "email": "viewer@example.com",
+                        "password": "viewer-password",
+                        "role": "viewer",
+                    },
                 )
-                assert me_response.status_code == 200
-                assert me_response.json()["email"] == "postgres@example.com"
-                assert "hashed_password" not in me_response.json()
+                assert created.status_code == 201
+                assert created.json()["role"] == "viewer"
+                assert "hashed_password" not in created.text
+
+                duplicate = client.post(
+                    "/api/v1/users",
+                    headers=admin_headers,
+                    json={
+                        "full_name": "Duplicate",
+                        "email": "VIEWER@example.com",
+                        "password": "another-password",
+                    },
+                )
+                assert duplicate.status_code == 409
+
+                viewer_login = client.post(
+                    "/api/v1/auth/login",
+                    data={
+                        "username": "viewer@example.com",
+                        "password": "viewer-password",
+                    },
+                )
+                viewer_headers = {
+                    "Authorization": f"Bearer {viewer_login.json()['access_token']}"
+                }
+                assert (
+                    client.get("/api/v1/users", headers=viewer_headers).status_code
+                    == 403
+                )
+                assert (
+                    client.get("/api/v1/users", headers=admin_headers).status_code
+                    == 200
+                )
+
+                with Session(bind=connection) as inspection_session:
+                    saved_users = list(
+                        inspection_session.scalars(select(User).order_by(User.id))
+                    )
+                    assert len(saved_users) == 2
+                    viewer = saved_users[1]
+                    assert viewer.hashed_password != "viewer-password"
+                    assert PasswordHash.recommended().verify(
+                        "viewer-password",
+                        viewer.hashed_password,
+                    )
         finally:
             app.dependency_overrides.clear()
             connection.rollback()

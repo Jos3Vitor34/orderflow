@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -5,31 +6,35 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.integrations.stripe import StripeGateway, StripePaymentIntentGateway
 from app.integrations.stripe_refund import (
     StripeRefundGateway,
     StripeRefundGatewayAdapter,
 )
 from app.integrations.stripe_webhook import StripeWebhookVerifier
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.customer import CustomerRepository
 from app.repositories.order import OrderRepository
 from app.repositories.payment import PaymentRepository
 from app.repositories.product import ProductRepository
 from app.repositories.refund import RefundRepository
+from app.repositories.statistics import StatisticsRepository
 from app.repositories.stripe_payment import StripePaymentRepository
 from app.repositories.stripe_webhook import StripeWebhookRepository
 from app.repositories.user import UserRepository
 from app.repositories.webhook_event import WebhookEventRepository
 from app.services.auth import AuthService, InvalidTokenError
 from app.services.customer import CustomerService
+from app.services.health import ReadinessService
 from app.services.order import OrderService
 from app.services.payment import PaymentService
 from app.services.product import ProductService
 from app.services.refund import RefundService
+from app.services.statistics import StatisticsService
 from app.services.stripe_payment import StripePaymentService
 from app.services.stripe_webhook import StripeWebhookService
+from app.services.user import UserService
 from app.services.webhook_event import WebhookEventService
 from app.tasks import send_order_confirmation, send_payment_notification
 
@@ -41,6 +46,24 @@ def get_auth_service(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AuthService:
     return AuthService(UserRepository(session), settings)
+
+
+def get_user_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> UserService:
+    return UserService(UserRepository(session))
+
+
+def get_readiness_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ReadinessService:
+    return ReadinessService(SessionLocal, settings)
+
+
+def get_statistics_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> StatisticsService:
+    return StatisticsService(StatisticsRepository(session))
 
 
 def get_customer_service(
@@ -143,3 +166,28 @@ def get_current_user(
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
+
+def require_roles(*allowed_roles: UserRole) -> Callable[..., User]:
+    allowed = frozenset(allowed_roles)
+
+    def authorize(
+        current_user: Annotated[User, Depends(get_current_user)],
+    ) -> User:
+        if current_user.role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return current_user
+
+    return authorize
+
+
+require_viewer = require_roles(
+    UserRole.VIEWER,
+    UserRole.OPERATOR,
+    UserRole.ADMIN,
+)
+require_operator = require_roles(UserRole.OPERATOR, UserRole.ADMIN)
+require_admin = require_roles(UserRole.ADMIN)

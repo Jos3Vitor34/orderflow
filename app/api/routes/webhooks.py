@@ -12,10 +12,10 @@ from fastapi import (
 )
 
 from app.api.dependencies import (
-    get_current_user,
     get_stripe_webhook_service,
     get_stripe_webhook_verifier,
     get_webhook_event_service,
+    require_viewer,
 )
 from app.integrations.stripe_webhook import (
     StripeWebhookConfigurationError,
@@ -48,7 +48,6 @@ receiver_router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 admin_router = APIRouter(
     prefix="/webhook-events",
     tags=["webhook-events"],
-    dependencies=[Depends(get_current_user)],
 )
 
 UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
@@ -164,6 +163,7 @@ def receive_webhook(
     "",
     response_model=WebhookEventListResponse,
     responses=UNAUTHORIZED_RESPONSE,
+    dependencies=[Depends(require_viewer)],
 )
 def list_webhook_events(
     service: Annotated[WebhookEventService, Depends(get_webhook_event_service)],
@@ -177,6 +177,7 @@ def list_webhook_events(
     "/{webhook_event_id}",
     response_model=WebhookEventResponse,
     responses=UNAUTHORIZED_RESPONSE | NOT_FOUND_RESPONSE,
+    dependencies=[Depends(require_viewer)],
 )
 def get_webhook_event(
     webhook_event_id: int,

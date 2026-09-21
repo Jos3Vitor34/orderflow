@@ -5,29 +5,11 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from app.api.dependencies import get_auth_service, get_current_user
 from app.models.user import User
-from app.repositories.user import DuplicateEmailError
-from app.schemas.auth import AccessToken, UserPublic, UserRegister
+from app.schemas.auth import AccessToken
+from app.schemas.user import UserPublic
 from app.services.auth import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-@router.post(
-    "/register",
-    response_model=UserPublic,
-    status_code=status.HTTP_201_CREATED,
-)
-def register(
-    data: UserRegister,
-    service: Annotated[AuthService, Depends(get_auth_service)],
-) -> User:
-    try:
-        return service.register(data)
-    except DuplicateEmailError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this e-mail already exists",
-        ) from exc
 
 
 @router.post("/login", response_model=AccessToken)

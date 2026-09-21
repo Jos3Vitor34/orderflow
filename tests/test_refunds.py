@@ -22,7 +22,7 @@ from app.integrations.stripe_refund import (
 from app.main import app
 from app.models.payment import Payment, PaymentStatus
 from app.models.refund import Refund, RefundStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.refund import RefundConstraintError
 from app.services.refund import RefundService
 
@@ -217,6 +217,7 @@ def refund_context() -> Generator[
         full_name="Refund Tester",
         email="refunds@example.com",
         hashed_password="not-used",
+        role=UserRole.ADMIN,
         is_active=True,
         created_at=now,
         updated_at=now,

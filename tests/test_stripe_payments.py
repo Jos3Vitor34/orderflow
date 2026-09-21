@@ -22,7 +22,7 @@ from app.integrations.stripe import (
 from app.main import app
 from app.models.order import Order, OrderStatus
 from app.models.payment import Payment, PaymentStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.payment import (
     DuplicatePaymentReferenceError,
     PaymentConstraintError,
@@ -160,6 +160,7 @@ def stripe_context() -> Generator[
         full_name="Stripe User",
         email="stripe-user@example.com",
         hashed_password="not-used",
+        role=UserRole.ADMIN,
         is_active=True,
         created_at=now,
         updated_at=now,

@@ -1,9 +1,17 @@
+import logging
+
 from celery import Celery
-from celery.signals import worker_process_init
+from celery.signals import (
+    after_setup_logger,
+    after_setup_task_logger,
+    worker_process_init,
+)
 
 from app.core.config import get_settings
+from app.core.logging import configure_logger, configure_logging
 
 settings = get_settings()
+configure_logging(settings)
 
 celery_app = Celery(
     "orderflow",
@@ -24,7 +32,15 @@ celery_app.conf.update(
     task_serializer="json",
     timezone="UTC",
     worker_prefetch_multiplier=1,
+    worker_hijack_root_logger=False,
 )
+
+
+@after_setup_logger.connect(weak=False)
+@after_setup_task_logger.connect(weak=False)
+def configure_celery_logging(logger: logging.Logger, **_: object) -> None:
+    """Keep Celery and task events on the shared JSON logging strategy."""
+    configure_logger(logger, settings)
 
 
 @worker_process_init.connect(weak=False)
