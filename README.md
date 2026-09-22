@@ -781,8 +781,8 @@ somente operadores autenticados podem enviar seus eventos.
 Uma evolução futura pode incluir outbox transacional, notificações reais e
 observabilidade distribuída. Nenhuma dessas funções é necessária para executar
 o portfólio local. Mantido por José Vitor; contribuições pequenas seguem
-[CONTRIBUTING.md](CONTRIBUTING.md). A licença permanece pendente de escolha do
-autor antes da publicação.
+[CONTRIBUTING.md](CONTRIBUTING.md). Distribuído sob a
+[licença MIT](LICENSE).
 
 A configuração segue a documentação oficial de
 [tasks do Celery](https://docs.celeryq.dev/en/stable/userguide/tasks.html),

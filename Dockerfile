@@ -9,7 +9,7 @@ WORKDIR /app
 RUN groupadd --system orderflow \
     && useradd --system --gid orderflow --home-dir /app orderflow
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY app ./app
 RUN python -m pip install --no-cache-dir --upgrade "pip>=26.2,<27" \
     && python -m pip install --no-cache-dir . \
