@@ -7,9 +7,9 @@ from app.integrations.stripe_webhook import VerifiedStripeEvent
 from app.models.payment import PaymentStatus
 from app.models.refund import RefundStatus
 from app.models.webhook_event import WebhookEvent
+from app.repositories.stripe_webhook import StripeWebhookRepository
 from app.repositories.webhook_event import (
     DuplicateWebhookEventIdError,
-    WebhookEventRepository,
 )
 from app.services.payment import (
     InvalidPaymentStatusTransitionError,
@@ -44,7 +44,7 @@ class StripeWebhookReceipt:
 class StripeWebhookService:
     def __init__(
         self,
-        repository: WebhookEventRepository,
+        repository: StripeWebhookRepository,
         *,
         currency: str,
     ) -> None:
@@ -120,8 +120,12 @@ class StripeWebhookService:
             if isinstance(local_id, str) and local_id.isdecimal():
                 local_refund_id = int(local_id)
         try:
-            refund_status = RefundStatus(status_value)
+            refund_status = (
+                RefundStatus(status_value) if isinstance(status_value, str) else None
+            )
         except (TypeError, ValueError):
+            return None
+        if refund_status is None:
             return None
         if (
             not isinstance(refund_id, str)

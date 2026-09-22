@@ -9,7 +9,7 @@ def main() -> None:
     configure_logging(settings)
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # noqa: S104 - container listener; publishing is controlled by Compose
         port=8000,
         access_log=False,
         log_config=None,

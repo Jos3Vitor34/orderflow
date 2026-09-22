@@ -6,6 +6,7 @@ from app.repositories.customer import (
 from app.schemas.customer import (
     CustomerCreate,
     CustomerListResponse,
+    CustomerResponse,
     CustomerUpdate,
 )
 
@@ -39,7 +40,7 @@ class CustomerService:
         )
         pages = (total + page_size - 1) // page_size
         return CustomerListResponse(
-            items=customers,
+            items=[CustomerResponse.model_validate(customer) for customer in customers],
             total=total,
             page=page,
             page_size=page_size,

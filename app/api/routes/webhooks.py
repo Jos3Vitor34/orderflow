@@ -15,8 +15,10 @@ from app.api.dependencies import (
     get_stripe_webhook_service,
     get_stripe_webhook_verifier,
     get_webhook_event_service,
+    require_operator,
     require_viewer,
 )
+from app.api.responses import ResponseDescriptions
 from app.integrations.stripe_webhook import (
     StripeWebhookConfigurationError,
     StripeWebhookVerificationError,
@@ -50,9 +52,15 @@ admin_router = APIRouter(
     tags=["webhook-events"],
 )
 
-UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
-NOT_FOUND_RESPONSE = {404: {"description": "Internal resource not found"}}
-CONFLICT_RESPONSE = {409: {"description": "Webhook event conflicts with state"}}
+UNAUTHORIZED_RESPONSE: ResponseDescriptions = {
+    401: {"description": "Authentication required"}
+}
+NOT_FOUND_RESPONSE: ResponseDescriptions = {
+    404: {"description": "Internal resource not found"}
+}
+CONFLICT_RESPONSE: ResponseDescriptions = {
+    409: {"description": "Webhook event conflicts with state"}
+}
 
 
 @receiver_router.post(
@@ -113,7 +121,10 @@ async def receive_stripe_webhook(
     "/{provider}",
     response_model=WebhookEventResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operator)],
     responses={
+        401: {"description": "Authentication required"},
+        403: {"description": "Operator role required"},
         200: {"description": "Identical event already received"},
         404: {"description": "Referenced payment not found"},
         409: {"description": "Event collision or invalid payment transition"},
@@ -125,6 +136,11 @@ def receive_webhook(
     response: Response,
     service: Annotated[WebhookEventService, Depends(get_webhook_event_service)],
 ) -> WebhookEvent:
+    if provider.casefold() == "stripe":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use the signed Stripe webhook endpoint",
+        )
     try:
         receipt = service.receive(provider=provider, data=data)
     except InvalidWebhookPayloadError as exc:

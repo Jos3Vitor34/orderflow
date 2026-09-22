@@ -8,6 +8,7 @@ from app.api.dependencies import (
     require_operator,
     require_viewer,
 )
+from app.api.responses import ResponseDescriptions
 from app.models.product import Product
 from app.repositories.product import (
     DuplicateProductSkuError,
@@ -27,10 +28,14 @@ router = APIRouter(
     tags=["products"],
 )
 
-UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
-NOT_FOUND_RESPONSE = {404: {"description": "Product not found"}}
-SKU_CONFLICT_RESPONSE = {409: {"description": "Product SKU already exists"}}
-DELETE_CONFLICT_RESPONSE = {
+UNAUTHORIZED_RESPONSE: ResponseDescriptions = {
+    401: {"description": "Authentication required"}
+}
+NOT_FOUND_RESPONSE: ResponseDescriptions = {404: {"description": "Product not found"}}
+SKU_CONFLICT_RESPONSE: ResponseDescriptions = {
+    409: {"description": "Product SKU already exists"}
+}
+DELETE_CONFLICT_RESPONSE: ResponseDescriptions = {
     409: {"description": "Product has related records and cannot be deleted"}
 }
 

@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, func, select
+from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app.models.order import Order, OrderStatus
 from app.models.payment import Payment, PaymentStatus
@@ -33,12 +33,12 @@ class StatisticsRepository:
 
     @staticmethod
     def _period_conditions(
-        created_at: object,
+        created_at: InstrumentedAttribute[datetime],
         *,
         start: datetime | None,
         end: datetime | None,
-    ) -> list[object]:
-        conditions: list[object] = []
+    ) -> list[ColumnElement[bool]]:
+        conditions: list[ColumnElement[bool]] = []
         if start is not None:
             conditions.append(created_at >= start)
         if end is not None:

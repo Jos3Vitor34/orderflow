@@ -69,7 +69,7 @@ class RefundRepository:
                 ),
             )
         )
-        return Decimal(value)
+        return Decimal(value or 0)
 
     def succeeded_amount(self, payment_id: int) -> Decimal:
         self._session.flush()
@@ -79,7 +79,7 @@ class RefundRepository:
                 Refund.status == RefundStatus.SUCCEEDED,
             )
         )
-        return Decimal(value)
+        return Decimal(value or 0)
 
     def create_reservation(
         self,

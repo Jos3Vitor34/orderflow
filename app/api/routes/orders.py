@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies import get_order_service, require_operator, require_viewer
+from app.api.responses import ResponseDescriptions
 from app.repositories.order import OrderPersistenceError
 from app.schemas.order import (
     OrderCreate,
@@ -28,9 +29,15 @@ router = APIRouter(
     tags=["orders"],
 )
 
-UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
-NOT_FOUND_RESPONSE = {404: {"description": "Order or related resource not found"}}
-CONFLICT_RESPONSE = {409: {"description": "Order conflicts with resource state"}}
+UNAUTHORIZED_RESPONSE: ResponseDescriptions = {
+    401: {"description": "Authentication required"}
+}
+NOT_FOUND_RESPONSE: ResponseDescriptions = {
+    404: {"description": "Order or related resource not found"}
+}
+CONFLICT_RESPONSE: ResponseDescriptions = {
+    409: {"description": "Order conflicts with resource state"}
+}
 
 
 def not_found_response(detail: str) -> HTTPException:

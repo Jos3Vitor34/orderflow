@@ -1,0 +1,28 @@
+# Debian Trixie has no fixed packages for these image findings as of 2026-09-22.
+# Each exception expires in 30 days; review the Debian trackers before renewal.
+# Do not add a blanket ignore-unfixed rule: new CVEs must fail the image gate.
+vulnerabilities:
+  - id: CVE-2025-69720
+    expired_at: 2026-10-22
+    statement: "ncurses in Debian Trixie; no fixed version. Review https://security-tracker.debian.org/tracker/CVE-2025-69720"
+  - id: CVE-2026-16742
+    expired_at: 2026-10-22
+    statement: "systemd in Debian Trixie; no fixed version. Review https://security-tracker.debian.org/tracker/CVE-2026-16742"
+  - id: CVE-2026-54369
+    expired_at: 2026-10-22
+    statement: "acl in Debian Trixie; no fixed version. Review https://security-tracker.debian.org/tracker/CVE-2026-54369"
+  - id: CVE-2026-76642
+    expired_at: 2026-10-22
+    statement: "util-linux in Debian Trixie; no fixed version. Review https://security-tracker.debian.org/tracker/CVE-2026-76642"
+  - id: CVE-2026-78408
+    expired_at: 2026-10-22
+    statement: "util-linux in Debian Trixie; no fixed version. Review https://security-tracker.debian.org/tracker/CVE-2026-78408"
+  - id: CVE-2026-78409
+    expired_at: 2026-10-22
+    statement: "util-linux in Debian Trixie; no fixed version. Review https://security-tracker.debian.org/tracker/CVE-2026-78409"
+  - id: CVE-2026-78410
+    expired_at: 2026-10-22
+    statement: "util-linux in Debian Trixie; no fixed version. Review https://security-tracker.debian.org/tracker/CVE-2026-78410"
+  - id: CVE-2026-9538
+    expired_at: 2026-10-22
+    statement: "perl in Debian Trixie; no fixed version. Review https://security-tracker.debian.org/tracker/CVE-2026-9538"

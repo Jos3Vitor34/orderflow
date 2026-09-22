@@ -1,6 +1,11 @@
 from app.models.product import Product
 from app.repositories.product import DuplicateProductSkuError, ProductRepository
-from app.schemas.product import ProductCreate, ProductListResponse, ProductUpdate
+from app.schemas.product import (
+    ProductCreate,
+    ProductListResponse,
+    ProductResponse,
+    ProductUpdate,
+)
 
 
 class ProductNotFoundError(Exception):
@@ -30,7 +35,7 @@ class ProductService:
         )
         pages = (total + page_size - 1) // page_size
         return ProductListResponse(
-            items=products,
+            items=[ProductResponse.model_validate(product) for product in products],
             total=total,
             page=page,
             page_size=page_size,

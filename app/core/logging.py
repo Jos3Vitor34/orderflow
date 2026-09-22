@@ -86,7 +86,7 @@ class JsonFormatter(logging.Formatter):
             if key not in _STANDARD_RECORD_ATTRIBUTES and key not in event:
                 event[key] = sanitize_value(key, value)
 
-        if record.exc_info:
+        if record.exc_info and record.exc_info[0] is not None:
             event["exception_type"] = record.exc_info[0].__name__
             event["exception"] = sanitize_text(self.formatException(record.exc_info))
         return json.dumps(event, ensure_ascii=False, separators=(",", ":"))

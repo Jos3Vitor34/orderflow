@@ -47,7 +47,7 @@ Comandos executados antes de qualquer staging:
 
 ```text
 git rev-parse --is-inside-work-tree       -> true
-git rev-parse --show-toplevel             -> C:/Users/josev/OneDrive/Desktop/orderflow
+git rev-parse --show-toplevel             -> <workspace>/orderflow
 git status --short --branch               -> ## No commits yet on main
 git ls-files                              -> saída vazia
 git log --oneline --decorate -n 10        -> branch main sem commits

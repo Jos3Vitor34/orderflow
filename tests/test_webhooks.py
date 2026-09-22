@@ -174,7 +174,7 @@ def webhook_payload(
     }
 
 
-def test_webhook_receiver_does_not_require_user_jwt(
+def test_legacy_webhook_requires_operator_jwt(
     webhook_context: tuple[TestClient, InMemoryWebhookEventRepository, Order, Product],
 ) -> None:
     client, _, _, _ = webhook_context
@@ -189,7 +189,24 @@ def test_webhook_receiver_does_not_require_user_jwt(
         },
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_legacy_webhook_rejects_viewer_and_stripe_alias(
+    webhook_context: tuple[TestClient, InMemoryWebhookEventRepository, Order, Product],
+) -> None:
+    client, repository, _, _ = webhook_context
+    viewer = User(id=2, role=UserRole.VIEWER, is_active=True)
+    app.dependency_overrides[get_current_user] = lambda: viewer
+    denied = client.post("/api/v1/webhooks/provider-a", json=webhook_payload())
+    assert denied.status_code == 403
+    assert repository.process_calls == 0
+
+    viewer.role = UserRole.OPERATOR
+    alias = client.post("/api/v1/webhooks/Stripe", json=webhook_payload())
+    assert alias.status_code == 400
+    assert repository.process_calls == 0
 
 
 def test_approved_event_is_persisted_and_updates_payment_once(
@@ -515,15 +532,18 @@ def test_admin_list_validates_pagination(
     assert response.status_code == 422
 
 
-def test_webhook_openapi_separates_public_receiver_from_authenticated_audit() -> None:
+def test_webhook_openapi_separates_signed_stripe_from_authenticated_legacy() -> None:
     schema = app.openapi()
     receiver = schema["paths"]["/api/v1/webhooks/{provider}"]
     collection = schema["paths"]["/api/v1/webhook-events"]
     resource = schema["paths"]["/api/v1/webhook-events/{webhook_event_id}"]
 
     assert set(receiver) == {"post"}
-    assert "security" not in receiver["post"]
-    assert {"200", "201", "404", "409", "422"} <= set(receiver["post"]["responses"])
+    assert receiver["post"]["security"] == [{"OAuth2PasswordBearer": []}]
+    assert "security" not in schema["paths"]["/api/v1/webhooks/stripe"]["post"]
+    assert {"200", "201", "401", "403", "404", "409", "422"} <= set(
+        receiver["post"]["responses"]
+    )
     assert set(collection) == {"get"}
     assert set(resource) == {"get"}
     for operation in [*collection.values(), *resource.values()]:

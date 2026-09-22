@@ -217,6 +217,7 @@ def test_stripe_payment_flow_and_concurrency_against_postgresql() -> None:
                 assert generic_payment.status_code == 201
                 generic_webhook = client.post(
                     "/api/v1/webhooks/provider-a",
+                    headers=headers,
                     json={
                         "provider_event_id": "evt-after-stripe",
                         "event_type": "provider.ping",

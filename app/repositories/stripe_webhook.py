@@ -69,7 +69,7 @@ class StripeWebhookRepository(WebhookEventRepository):
                 Refund.status == RefundStatus.SUCCEEDED,
             )
         )
-        return Decimal(value)
+        return Decimal(value or 0)
 
     def commit_refund_processed(
         self,

@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from typing import Literal
 
 from redis import Redis
 from redis.exceptions import RedisError
@@ -38,7 +39,7 @@ class ReadinessService:
             components=components,
         )
 
-    def _check_postgres(self) -> str:
+    def _check_postgres(self) -> Literal["ok", "unavailable"]:
         try:
             with self._session_factory() as session:
                 session.execute(text("SELECT 1"))
@@ -50,10 +51,10 @@ class ReadinessService:
             return "unavailable"
         return "ok"
 
-    def _check_redis(self) -> str:
+    def _check_redis(self) -> Literal["ok", "unavailable"]:
         timeout = self._settings.readiness_timeout_seconds
         client: Redis | None = None
-        result = "ok"
+        result: Literal["ok", "unavailable"] = "ok"
         try:
             client = self._redis_factory(
                 str(self._settings.redis_url),

@@ -1,0 +1,22 @@
+title = "OrderFlow secret scan"
+
+[extend]
+useDefault = true
+
+# Local dependency caches and downloaded scanners are outside the repository artifact.
+[[allowlists]]
+description = "Git-ignored local environment and generated tooling"
+paths = [
+  '''^\.(?:venv|git|tools|reports|trivycache|mypy_cache|ruff_cache|pytest_cache|audit-cache[^/\\]*)[/\\]''',
+  '''^htmlcov[/\\]''',
+  '''^pytest-cache-files-[^/\\]+[/\\]''',
+  '''^\.env$''',
+  '''(^|[/\\])__pycache__[/\\]''',
+  '''^orderflow_api\.egg-info[/\\]''',
+]
+
+[[allowlists]]
+description = "Explicit synthetic Stripe keys in sanitizer tests"
+condition = "AND"
+paths = ['''^tests[/\\](?:test_logging|test_refunds|test_stripe_payments)\.py$''']
+regexes = ['''^sk_test_(?:supersecret|placeholder)$''']

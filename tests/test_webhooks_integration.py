@@ -82,6 +82,7 @@ def test_complete_webhook_flow_and_concurrency_against_postgresql() -> None:
                 headers = {
                     "Authorization": f"Bearer {login_response.json()['access_token']}"
                 }
+                client.headers.update(headers)
 
                 customer_response = client.post(
                     "/api/v1/customers",
@@ -396,6 +397,7 @@ def test_complete_webhook_flow_and_concurrency_against_postgresql() -> None:
                         == 1
                     )
 
+                client.headers.pop("Authorization")
                 unauthenticated_audit = client.get("/api/v1/webhook-events")
                 assert unauthenticated_audit.status_code == 401
                 audit_response = client.get(

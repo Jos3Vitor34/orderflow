@@ -8,6 +8,7 @@ from app.api.dependencies import (
     require_operator,
     require_viewer,
 )
+from app.api.responses import ResponseDescriptions
 from app.integrations.stripe import (
     StripeAuthenticationError,
     StripeConfigurationError,
@@ -54,9 +55,15 @@ router = APIRouter(
     tags=["payments"],
 )
 
-UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
-NOT_FOUND_RESPONSE = {404: {"description": "Payment or order not found"}}
-CONFLICT_RESPONSE = {409: {"description": "Payment conflicts with resource state"}}
+UNAUTHORIZED_RESPONSE: ResponseDescriptions = {
+    401: {"description": "Authentication required"}
+}
+NOT_FOUND_RESPONSE: ResponseDescriptions = {
+    404: {"description": "Payment or order not found"}
+}
+CONFLICT_RESPONSE: ResponseDescriptions = {
+    409: {"description": "Payment conflicts with resource state"}
+}
 
 
 @router.post(
@@ -179,7 +186,7 @@ def create_stripe_payment(
         status.HTTP_201_CREATED if receipt.created else status.HTTP_200_OK
     )
     return StripePaymentResponse(
-        payment=receipt.payment,
+        payment=PaymentResponse.model_validate(receipt.payment),
         stripe=StripePaymentIntentResponse(
             payment_intent_id=receipt.payment_intent.id,
             status=receipt.payment_intent.status,

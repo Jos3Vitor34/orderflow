@@ -8,6 +8,7 @@ from app.api.dependencies import (
     require_operator,
     require_viewer,
 )
+from app.api.responses import ResponseDescriptions
 from app.models.customer import Customer
 from app.repositories.customer import (
     CustomerDeleteConflictError,
@@ -26,10 +27,14 @@ router = APIRouter(
     tags=["customers"],
 )
 
-UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
-NOT_FOUND_RESPONSE = {404: {"description": "Customer not found"}}
-EMAIL_CONFLICT_RESPONSE = {409: {"description": "Customer e-mail already exists"}}
-DELETE_CONFLICT_RESPONSE = {
+UNAUTHORIZED_RESPONSE: ResponseDescriptions = {
+    401: {"description": "Authentication required"}
+}
+NOT_FOUND_RESPONSE: ResponseDescriptions = {404: {"description": "Customer not found"}}
+EMAIL_CONFLICT_RESPONSE: ResponseDescriptions = {
+    409: {"description": "Customer e-mail already exists"}
+}
+DELETE_CONFLICT_RESPONSE: ResponseDescriptions = {
     409: {"description": "Customer has related records and cannot be deleted"}
 }
 

@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from app.api.dependencies import get_refund_service, require_operator, require_viewer
+from app.api.responses import ResponseDescriptions
 from app.integrations.stripe import (
     StripeAuthenticationError,
     StripeConfigurationError,
@@ -41,7 +42,9 @@ refunds_router = APIRouter(
     tags=["refunds"],
 )
 
-UNAUTHORIZED_RESPONSE = {401: {"description": "Authentication required"}}
+UNAUTHORIZED_RESPONSE: ResponseDescriptions = {
+    401: {"description": "Authentication required"}
+}
 
 
 @payments_refunds_router.post(

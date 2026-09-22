@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies import get_user_service, require_admin
+from app.api.responses import ResponseDescriptions
 from app.models.user import User
 from app.repositories.user import DuplicateEmailError
 from app.schemas.user import (
@@ -17,7 +18,7 @@ from app.services.user import LastActiveAdminError, UserNotFoundError, UserServi
 router = APIRouter(prefix="/users", tags=["users"])
 admin_dependency = Depends(require_admin)
 
-AUTHORIZATION_RESPONSES = {
+AUTHORIZATION_RESPONSES: ResponseDescriptions = {
     401: {"description": "Authentication required"},
     403: {"description": "Administrator role required"},
 }

@@ -171,6 +171,7 @@ def test_stripe_webhook_atomicity_concurrency_and_public_integrity() -> None:
 
                 generic = client.post(
                     "/api/v1/webhooks/manual",
+                    headers=auth,
                     json={
                         "provider_event_id": "evt_generic_still_works",
                         "event_type": "manual.ping",

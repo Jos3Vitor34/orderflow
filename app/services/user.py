@@ -1,6 +1,6 @@
 from app.models.user import User, UserRole
 from app.repositories.user import DuplicateEmailError, UserRepository
-from app.schemas.user import UserCreate, UserListResponse
+from app.schemas.user import UserCreate, UserListResponse, UserPublic
 from app.services.auth import AuthService, hash_password
 
 
@@ -33,7 +33,7 @@ class UserService:
             limit=page_size,
         )
         return UserListResponse(
-            items=users,
+            items=[UserPublic.model_validate(user) for user in users],
             total=total,
             page=page,
             page_size=page_size,

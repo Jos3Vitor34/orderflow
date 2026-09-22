@@ -47,4 +47,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # BaseSettings obtains the required secret from the environment at runtime.
+    return Settings()  # type: ignore[call-arg]

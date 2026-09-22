@@ -1,16 +1,31 @@
 # OrderFlow API
 
-Backend para gerenciamento de pedidos e automações, desenvolvido de forma
-incremental com Python, FastAPI, PostgreSQL, SQLAlchemy, Redis e Celery.
+API de gerenciamento de pedidos e pagamentos para demonstrar desenho de domínio,
+persistência transacional, processamento assíncrono e segurança de uma aplicação
+backend. O fluxo principal é Customer e Product → Order → Payment → confirmação
+ou refund; o worker processa notificações simuladas e relatórios.
+
+**Stack:** Python 3.12, FastAPI, Pydantic, SQLAlchemy 2, Alembic, PostgreSQL 17,
+Redis 8, Celery 5.6, Stripe Test Mode e Docker Compose. A API expõe OpenAPI em
+`/docs` e `/openapi.json`. Não há frontend nem deploy público.
+
+```mermaid
+flowchart LR
+    Client[Cliente HTTP] --> API[FastAPI]
+    API --> PG[(PostgreSQL)]
+    API --> Redis[(Redis)]
+    Redis --> Worker[Celery worker]
+    Worker --> PG
+    Stripe[Stripe Test Mode] -->|Stripe-Signature| API
+```
 
 ## Estado do projeto
 
-A Fase 18 adiciona RBAC (`ADMIN`, `OPERATOR` e `VIEWER`), administração segura
-de usuários, logs estruturados, correlation ID HTTP/Celery, liveness, readiness
-e estatísticas agregadas. Permanecem disponíveis os fluxos anteriores de
-Orders, Payments, Refunds, webhooks Stripe e tasks resilientes. Não há cadastro
-público, refresh token, chamadas Stripe reais nos testes nem plataforma externa
-de observabilidade.
+O projeto inclui RBAC (`ADMIN`, `OPERATOR` e `VIEWER`), administração de usuários,
+logs JSON com correlation ID HTTP/Celery, liveness/readiness, estatísticas
+agregadas, Orders, Payments, Refunds, webhooks Stripe assinados e tasks com retry
+limitado. Testes automatizados não chamam a Stripe. A integração PostgreSQL usa
+schemas isolados; o Compose preserva o volume do banco ao encerrar.
 
 ## Requisitos
 
@@ -18,13 +33,35 @@ de observabilidade.
 - `pip`
 - Docker com Docker Compose
 
+## Início rápido
+
+Na raiz do projeto, copie o exemplo de ambiente:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Substitua `JWT_SECRET_KEY` no `.env` por um valor aleatório de ao menos 32
+caracteres. Então:
+
+```powershell
+docker compose up -d --build --wait
+docker compose exec api python -m app.cli bootstrap-admin `
+  --email "<valid-admin-email>" --full-name "Local Admin"
+```
+
+Abra `http://localhost:8000/docs`, autentique-se pelo endpoint de login abaixo
+e, ao terminar, execute `docker compose down` para preservar o banco. O prompt
+de bootstrap pede a senha sem ecoá-la.
+
 ## Ambiente de desenvolvimento
 
 Crie e ative um ambiente virtual e instale as dependências de desenvolvimento:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --group dev
+.\.venv\Scripts\python.exe -m pip install --upgrade "pip>=26.2,<27"
+.\.venv\Scripts\python.exe -m pip install --group dev .
 ```
 
 Copie `.env.example` para `.env` e substitua `JWT_SECRET_KEY` por um segredo
@@ -51,8 +88,8 @@ Inicie somente o banco de dados:
 docker compose up -d --wait postgres
 ```
 
-A aplicação executada no host se conecta a
-`postgresql+psycopg://orderflow:orderflow_password@localhost:5432/orderflow`.
+A aplicação executada no host usa o `DATABASE_URL` de `.env.example`, apontando
+para o PostgreSQL do Compose em `localhost:5432`.
 Para encerrar o contêiner preservando os dados, execute:
 
 ```bash
@@ -78,6 +115,15 @@ alembic check
 
 Use downgrade somente em banco descartável: `alembic downgrade base` é
 destrutivo para os dados das tabelas removidas.
+
+Em upgrades de instalações anteriores ao RBAC, a migration
+`b6f42d1c8a90_add_user_roles` atribui `admin` a **todos** os usuários existentes
+para preservar acesso às operações antigas. Em banco vazio, não promove ninguém:
+crie o primeiro administrador pelo comando abaixo. Depois de migrar um ambiente
+existente, revise imediatamente `SELECT id, email, role, is_active FROM users
+WHERE role = 'admin' ORDER BY id` e reduza privilégios pela API de administração
+conforme a função real de cada pessoa. Não execute downgrade em dados reais apenas
+para revisar roles; a migration aplicada permanece intacta.
 
 ## Execução
 
@@ -105,14 +151,14 @@ senha:
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.cli bootstrap-admin `
-  --email admin@example.com --full-name "Local Admin"
+  --email "<valid-admin-email>" --full-name "Local Admin"
 ```
 
 No Docker:
 
 ```bash
 docker compose run --rm api python -m app.cli bootstrap-admin \
-  --email admin@example.com --full-name "Local Admin"
+  --email '<valid-admin-email>' --full-name "Local Admin"
 ```
 
 Em automação não interativa, defina temporariamente
@@ -122,7 +168,7 @@ ser persistida e nunca é registrada. E-mail duplicado é recusado.
 ```powershell
 $env:ORDERFLOW_ADMIN_PASSWORD = "replace-this-temporary-password"
 .\.venv\Scripts\python.exe -m app.cli bootstrap-admin `
-  --email admin@example.com --full-name "Local Admin"
+  --email "<valid-admin-email>" --full-name "Local Admin"
 Remove-Item Env:ORDERFLOW_ADMIN_PASSWORD
 ```
 
@@ -141,7 +187,7 @@ Exemplo de login e uso do token (valores fictícios):
 ```bash
 curl -s -X POST http://localhost:8000/api/v1/auth/login \
   -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode 'username=admin@example.com' \
+  --data-urlencode 'username=<valid-admin-email>' \
   --data-urlencode 'password=replace-this-local-password'
 
 curl -s http://localhost:8000/api/v1/orders \
@@ -160,9 +206,9 @@ curl -s http://localhost:8000/api/v1/orders \
 | Login, liveness e readiness | Público | Público | Público |
 | Webhook Stripe | `Stripe-Signature` | `Stripe-Signature` | `Stripe-Signature` |
 
-O receptor provider-agnostic legado também permanece público, conforme seu
-contrato existente; ele não substitui o endpoint Stripe assinado. Uma ausência
-ou falha de autenticação retorna `401` com `WWW-Authenticate: Bearer`; um usuário
+O receptor genérico legado exige token de `OPERATOR` ou `ADMIN`, pois eventos
+reconhecidos podem alterar Payments. Ele não substitui o endpoint Stripe assinado.
+Uma ausência ou falha de autenticação retorna `401` com `WWW-Authenticate: Bearer`; um usuário
 válido sem a role necessária recebe `403`.
 
 ## Logs estruturados e correlation ID
@@ -364,7 +410,7 @@ pelo cliente:
 ```http
 POST /api/v1/payments/42/refunds
 Authorization: Bearer <token>
-Idempotency-Key: refund-order-42-attempt-1
+Idempotency-Key: <unique-request-key>
 Content-Type: application/json
 
 {"amount": "25.50", "reason": "requested_by_customer"}
@@ -394,9 +440,11 @@ Não há chamada real à Stripe nos testes automatizados.
 
 ## Webhooks
 
-`POST /api/v1/webhooks/{provider}` continua recebendo o contrato interno
-provider-agnostic da Fase 11 sem JWT. Esse receptor genérico não ganha uma
-assinatura inventada e não deve ser usado para entregas Stripe.
+`POST /api/v1/webhooks/{provider}` recebe o contrato interno legado somente com
+Bearer JWT de `OPERATOR` ou `ADMIN`. A rota é para simulação ou integrações
+internas confiáveis: não valida assinatura própria de cada provider. A mudança
+intencional remove o acesso público anterior, que permitia alterar Payments sem
+autenticidade. O provider `stripe` é reservado à rota oficial assinada.
 
 O envelope interno é:
 
@@ -501,14 +549,16 @@ A implementação segue a documentação oficial de
 [verificação de assinatura](https://docs.stripe.com/webhooks/signature),
 [testes locais](https://docs.stripe.com/webhooks/test) e
 [tipos de evento](https://docs.stripe.com/api/events/types), usando a
-[Stripe Python SDK](https://docs.stripe.com/sdks/python) já fixada no projeto.
+[Stripe Python SDK](https://docs.stripe.com/sdks/python) declarada no projeto.
 
 ## Verificações de qualidade
 
 ```bash
 ruff check .
 ruff format --check .
-pytest
+mypy
+pytest -m 'not integration'
+python -m pip_audit --local
 ```
 
 Com o PostgreSQL do Compose em execução, a integração real é validada com:
@@ -526,8 +576,27 @@ Bash:
 RUN_POSTGRES_INTEGRATION_TESTS=1 pytest -m integration
 ```
 
-A documentação completa de instalação, execução, API, Docker e decisões
-técnicas será consolidada na fase final.
+Para medir statements e branches em toda a suíte, com PostgreSQL disponível:
+
+```bash
+RUN_POSTGRES_INTEGRATION_TESTS=1 pytest --cov=app --cov-branch \
+  --cov-report=term-missing:skip-covered --cov-report=xml \
+  --cov-report=html --cov-fail-under=90
+```
+
+`coverage.xml` e `htmlcov/` são artefatos ignorados pelo Git. Migrations Alembic
+ficam fora da medição do pacote `app`; a integração as valida separadamente. O
+launcher `app/server.py` é validado pelo smoke test da stack e não entra na
+cobertura unitária. O
+limite de 90% combina testes locais e PostgreSQL, pois os repositories dependem do banco
+real. O repositório usa `pip` e grupos de dependências em `pyproject.toml`, sem
+lockfile; os intervalos de versão permitem atualização compatível e a auditoria
+verifica o ambiente resolvido. Atualizações do Dependabot precisam passar pela CI
+e por revisão antes de merge.
+
+A CI executa esses gates em Linux e Python 3.12. A integração usa PostgreSQL
+real e Redis; o worker é exercitado em testes locais no modo eager e no smoke
+test da stack.
 
 ## Redis, Celery e stack Docker
 
@@ -620,6 +689,10 @@ docker compose up -d --build
 docker compose ps
 ```
 
+PostgreSQL, Redis e API são publicados apenas em `127.0.0.1` por padrão;
+containers conversam pela rede interna do Compose. A imagem executa como usuário
+`orderflow` sem privilégios de root e tem healthcheck HTTP de liveness.
+
 A API fica em `http://localhost:8000`, com liveness público em `/health/live`,
 readiness em `/health/ready` e OpenAPI em `/openapi.json`. Diagnóstico:
 
@@ -667,8 +740,49 @@ social, rate limit distribuído, Prometheus/Grafana/Loki/ELK/OpenTelemetry,
 providers reais para notificações ou outbox transacional. Logs JSON não
 substituem uma plataforma completa de observabilidade. Continua existindo a
 janela entre commit do domínio e publicação no broker; sem outbox, uma task pode
-não ser publicada embora o commit tenha sido concluído. CI, type checking e
-deploy permanecem para a Fase 19.
+não ser publicada embora o commit tenha sido concluído. Não há deploy público.
+
+## Segurança e manutenção
+
+Os workflows de qualidade verificam Ruff, mypy, testes, PostgreSQL, migrations e
+cobertura de branches. O workflow de segurança audita dependências instaladas,
+varre árvore e histórico Git com Gitleaks, faz build e scan HIGH/CRITICAL da imagem
+com Trivy e gera uma SBOM CycloneDX como artefato da CI. Nenhum workflow publica
+imagem ou faz deploy. O workflow ainda precisa ser validado em uma execução
+remota depois da publicação autorizada do repositório.
+
+O webhook Stripe público exige `Stripe-Signature`; o receptor legado interno
+exige role operacional. Chaves da Stripe aceitas pela aplicação devem ser de Test
+Mode. `.env` é ignorado pelo Git e pelo contexto Docker. O Compose fornece senhas
+apenas para desenvolvimento local; substitua todos os defaults em qualquer outro
+ambiente. Consulte [SECURITY.md](SECURITY.md) para reportar vulnerabilidades e
+[a revisão de segurança da Fase 19](docs/SECURITY_REVIEW_PHASE_19.md) para as
+exceções temporárias do scan da imagem.
+
+## Dados de demonstração e limites
+
+Um smoke test manual pode criar registros persistentes no volume `postgres_data`.
+Testes automatizados de integração usam schemas descartáveis próprios; registros
+do smoke test são dados de demonstração e não devem ser confundidos com eles.
+Use identificadores novos, por exemplo um sufixo UUID em e-mails e SKUs, em cada
+execução manual. Para limpar demonstrações, faça backup, localize os IDs exatos em
+consultas `SELECT` e revise referências de Order, Payment, Refund e WebhookEvent;
+remova apenas os IDs aprovados em uma transação explícita. `docker compose down`
+preserva o volume. Nunca use `down -v` para limpar alguns registros.
+
+Além das limitações acima, não há refresh token, rate limiting distribuído,
+outbox transacional, notificações reais ou deploy de produção. A entrega Celery é
+ao menos uma vez; o Redis é efêmero e pode perder mensagens/resultados quando
+reiniciado. A autenticação de providers genéricos não usa assinatura própria:
+somente operadores autenticados podem enviar seus eventos.
+
+## Próximos passos
+
+Uma evolução futura pode incluir outbox transacional, notificações reais e
+observabilidade distribuída. Nenhuma dessas funções é necessária para executar
+o portfólio local. Mantido por José Vitor; contribuições pequenas seguem
+[CONTRIBUTING.md](CONTRIBUTING.md). A licença permanece pendente de escolha do
+autor antes da publicação.
 
 A configuração segue a documentação oficial de
 [tasks do Celery](https://docs.celeryq.dev/en/stable/userguide/tasks.html),

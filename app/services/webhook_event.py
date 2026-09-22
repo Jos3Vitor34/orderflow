@@ -120,7 +120,8 @@ class WebhookEventService:
                 created=True,
             )
 
-        assert provider_reference is not None
+        if provider_reference is None:
+            raise InvalidWebhookPayloadError
         payment = self._repository.get_payment_for_update(provider_reference)
         if payment is None:
             self._repository.commit_received(webhook_event)

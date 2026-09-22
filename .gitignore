@@ -19,7 +19,14 @@ venv/
 pytest-cache-files-*/
 .ruff_cache/
 .mypy_cache/
+.audit-cache*/
+.tools/
+.trivycache/
+.reports/
 .coverage
+.coverage.*
+coverage.xml
+*.sbom.json
 htmlcov/
 
 # Editors and operating systems

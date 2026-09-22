@@ -4,6 +4,7 @@ from typing import Protocol
 import stripe
 from pydantic import SecretStr
 from stripe import StripeClient
+from stripe.params._refund_create_params import RefundCreateParams
 
 from app.integrations.stripe import (
     StripeAuthenticationError,
@@ -69,7 +70,7 @@ class StripeRefundGatewayAdapter:
         metadata: dict[str, str],
         idempotency_key: str,
     ) -> StripeRefund:
-        params: dict[str, object] = {
+        params: RefundCreateParams = {
             "payment_intent": payment_intent,
             "amount": amount,
             "metadata": metadata,
