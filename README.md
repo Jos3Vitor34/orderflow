@@ -1,17 +1,18 @@
-# OrderFlow API
+# OrderFlow
 
-API de gerenciamento de pedidos e pagamentos para demonstrar desenho de domínio,
-persistência transacional, processamento assíncrono e segurança de uma aplicação
-backend. O fluxo principal é Customer e Product → Order → Payment → confirmação
-ou refund; o worker processa notificações simuladas e relatórios.
+Aplicação full stack de gerenciamento de pedidos e pagamentos. O painel em React
+consome uma API FastAPI com persistência transacional, processamento assíncrono e
+controle de acesso. O fluxo principal é Customer e Product → Order → Payment →
+confirmação ou refund; o worker processa notificações simuladas e relatórios.
 
-**Stack:** Python 3.12, FastAPI, Pydantic, SQLAlchemy 2, Alembic, PostgreSQL 17,
-Redis 8, Celery 5.6, Stripe Test Mode e Docker Compose. A API expõe OpenAPI em
-`/docs` e `/openapi.json`. Não há frontend nem deploy público.
+**Stack:** React, TypeScript, Vite, Tailwind CSS, Python 3.12, FastAPI, Pydantic,
+SQLAlchemy 2, Alembic, PostgreSQL 17, Redis 8, Celery 5.6, Stripe Test Mode e
+Docker Compose. A API expõe OpenAPI em `/docs` e `/openapi.json`. Não há deploy
+público.
 
 ```mermaid
 flowchart LR
-    Client[Cliente HTTP] --> API[FastAPI]
+    Browser[React + TypeScript] -->|HTTP / REST| API[FastAPI]
     API --> PG[(PostgreSQL)]
     API --> Redis[(Redis)]
     Redis --> Worker[Celery worker]
@@ -30,6 +31,7 @@ schemas isolados; o Compose preserva o volume do banco ao encerrar.
 ## Requisitos
 
 - Python 3.12 ou superior
+- Node.js 24 e npm
 - `pip`
 - Docker com Docker Compose
 
@@ -53,6 +55,44 @@ docker compose exec api python -m app.cli bootstrap-admin `
 Abra `http://localhost:8000/docs`, autentique-se pelo endpoint de login abaixo
 e, ao terminar, execute `docker compose down` para preservar o banco. O prompt
 de bootstrap pede a senha sem ecoá-la.
+
+Para abrir o painel em outra janela do terminal:
+
+```powershell
+Copy-Item frontend/.env.example frontend/.env
+Set-Location frontend
+npm ci
+npm run dev
+```
+
+Abra `http://localhost:5173` e entre com o administrador criado acima. O
+frontend usa `VITE_API_BASE_URL=http://localhost:8000` por padrão. Consulte o
+[guia do frontend](frontend/README.md) para páginas, configuração e comandos de
+qualidade.
+
+## Frontend
+
+O código do painel fica em `frontend/`; o backend permanece na raiz. As páginas
+cobrem dashboard, clientes, produtos, pedidos e seus detalhes, pagamentos,
+refunds e administração de usuários. A interface inicia em português do Brasil
+e permite alternar para inglês. A navegação e os comandos respeitam as roles
+`viewer`, `operator` e `admin`; a API aplica as permissões de fato.
+
+O login usa o formulário OAuth2 da API e guarda o JWT em `sessionStorage` até a
+aba ser fechada ou a sessão ser invalidada. A API não fornece cadastro público
+nem refresh token. O frontend não inclui Stripe Elements porque a resposta do
+PaymentIntent não contém `client_secret`; criação e acompanhamento usam somente
+os endpoints disponíveis, com Stripe em Test Mode.
+
+O navegador acessa a API diretamente. `CORS_ORIGINS` configura uma lista de
+origens HTTP separadas por vírgulas, com `http://localhost:5173` e
+`http://127.0.0.1:5173` permitidas por padrão. Adicione a origem exata do painel
+quando usar outra porta ou host. Variáveis `VITE_*` são públicas no bundle;
+segredos JWT, banco e Stripe permanecem apenas no backend.
+
+No diretório `frontend/`, execute `npm run typecheck`, `npm run lint`,
+`npm run test` e `npm run build`. A CI executa esses comandos com `npm ci` e
+mantém os checks existentes do backend.
 
 ## Ambiente de desenvolvimento
 
@@ -744,12 +784,13 @@ não ser publicada embora o commit tenha sido concluído. Não há deploy públi
 
 ## Segurança e manutenção
 
-Os workflows de qualidade verificam Ruff, mypy, testes, PostgreSQL, migrations e
-cobertura de branches. O workflow de segurança audita dependências instaladas,
+Os workflows de qualidade verificam o frontend (tipos, lint, testes e build),
+Ruff, mypy, testes, PostgreSQL, migrations e cobertura de branches. O workflow
+de segurança audita dependências Python instaladas e dependências npm do frontend,
 varre árvore e histórico Git com Gitleaks, faz build e scan HIGH/CRITICAL da imagem
 com Trivy e gera uma SBOM CycloneDX como artefato da CI. Nenhum workflow publica
-imagem ou faz deploy. O workflow ainda precisa ser validado em uma execução
-remota depois da publicação autorizada do repositório.
+imagem ou faz deploy. As execuções remotas podem ser acompanhadas na aba Actions
+do repositório.
 
 O webhook Stripe público exige `Stripe-Signature`; o receptor legado interno
 exige role operacional. Chaves da Stripe aceitas pela aplicação devem ser de Test
