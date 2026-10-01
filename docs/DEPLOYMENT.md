@@ -299,7 +299,7 @@ independentemente da ausência de deploy remoto.
 
 A operação documentada termina na máquina local. Não há próximo passo de
 provisionamento remoto, contratação de infraestrutura ou configuração de CD.
-O GitHub reúne o código, a documentação, o guia de capturas da interface, os
+O GitHub reúne o código, a documentação, as capturas reais da interface, os
 resultados da CI e a release pública destacada.
 
 Referências: [produção com Compose](https://docs.docker.com/compose/how-tos/production/),
