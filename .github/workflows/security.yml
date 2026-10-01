@@ -16,6 +16,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  security:
+    name: Security
+    if: always()
+    needs: [frontend-dependencies, dependencies, secrets, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every security job to pass
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          results = json.loads(os.environ["JOB_RESULTS"])
+          assert all(job["result"] == "success" for job in results.values()), results
+          PY
+
   frontend-dependencies:
     name: Frontend dependency audit
     runs-on: ubuntu-latest
