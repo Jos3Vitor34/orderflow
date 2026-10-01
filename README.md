@@ -12,6 +12,8 @@ Redis, Celery e Stripe Test Mode.
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)](docs/DEPLOYMENT.md)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+![Dashboard do OrderFlow com dados fictícios de pedidos e pagamentos](docs/assets/dashboard.png)
+
 [Executar localmente](#executando-localmente) · [Screenshots](#screenshots) ·
 [Arquitetura](#arquitetura) · [Documentação](#documentação) ·
 [Release v1.1.0](https://github.com/Jos3Vitor34/orderflow/releases/tag/v1.1.0)
@@ -91,11 +93,41 @@ migrations, persistência e configuração opcional de TLS. O
 
 ## Screenshots
 
-As screenshots reais ainda dependem de captura manual. As telas previstas são
-dashboard, pedidos, detalhes do pedido, produtos e login, usando somente dados
-fictícios. O [roteiro de captura](docs/assets/README.md) detalha páginas, resolução,
-nomes dos arquivos e sua inclusão no README. A aplicação pode ser explorada pelo
-ambiente local descrito abaixo.
+Capturas da aplicação real executada localmente com Docker Compose, em pt-BR
+e com dados fictícios. O dashboard aparece no início deste README. As imagens
+registram o estado da `main` posterior à `v1.1.0`; não são mockups.
+
+### Pedidos
+
+Lista com estados, valores e paginação dos pedidos de demonstração.
+
+![Lista de pedidos do OrderFlow com dados fictícios](docs/assets/orders.png)
+
+### Detalhes do pedido
+
+Cliente, itens, total e controles de transição de um pedido em processamento.
+
+![Detalhes de um pedido de demonstração no OrderFlow](docs/assets/order-details.png)
+
+<details>
+<summary>Ver produtos e login</summary>
+
+### Produtos
+
+Catálogo com SKU, preço, estoque e disponibilidade.
+
+![Catálogo de produtos fictícios do OrderFlow](docs/assets/products.png)
+
+### Login
+
+Formulário de acesso com os campos vazios.
+
+![Formulário de login do OrderFlow vazio](docs/assets/login.png)
+
+</details>
+
+O [registro das capturas](docs/assets/README.md) informa páginas, dimensões,
+tamanhos e como atualizar as imagens.
 
 ## Executando localmente
 
