@@ -8,7 +8,7 @@ na raiz; este diretório contém somente o aplicativo executado no navegador.
 - Node.js 24 e npm (a versão principal também está em `.nvmrc`)
 - Backend OrderFlow em `http://localhost:8000`
 - PostgreSQL, Redis, migrações e um usuário administrador inicializados conforme o
-  [README principal](../README.md)
+  [início rápido](../README.md#executando-localmente)
 
 Na raiz do repositório, inicie a API e suas dependências com
 `docker compose up -d --build --wait`. Crie o primeiro administrador com o comando
@@ -23,7 +23,7 @@ npm run dev
 
 Abra `http://localhost:5173`. O frontend roda com Vite no host e usa a API do
 Compose em `http://localhost:8000`. Para executar o backend diretamente no host,
-use os passos de desenvolvimento do README principal.
+use o [guia de desenvolvimento](../docs/DEVELOPMENT.md#ambiente-de-desenvolvimento).
 
 ## Configuração
 
@@ -124,4 +124,6 @@ desenvolvimento no host e está excluído do contexto Docker.
 
 Para a stack independente de produção, secrets, TLS e rollback, siga o
 [runbook](../docs/DEPLOYMENT.md). O desenvolvimento com `npm run dev` continua
-igual. Nenhuma imagem é publicada automaticamente e ainda não há deploy remoto.
+igual. O projeto é executado localmente e apresentado publicamente no GitHub;
+não mantém ambiente público permanente para evitar custos recorrentes de
+infraestrutura. Nenhuma imagem é publicada automaticamente.

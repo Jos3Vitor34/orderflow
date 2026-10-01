@@ -1,15 +1,29 @@
-# OrderFlow — produção local e preparação de deploy
+# OrderFlow — runbook da stack de produção local
 
-Não há servidor, domínio ou plataforma remota escolhidos/autorizados. Este
-runbook prepara o deploy e valida containers localmente. Não cria recursos pagos,
-registry público ou CD automático. A release v1.1.0 continua sendo a última;
-uma próxima release exige deploy remoto validado e Quality/Security verdes.
+O OrderFlow é apresentado publicamente pelo GitHub e executado localmente.
+**Não haverá ambiente público permanente nem deploy remoto**, salvo mudança
+explícita dessa decisão pelo mantenedor. A escolha evita custos recorrentes de
+infraestrutura: não há contratação de servidor, cloud, banco/Redis gerenciado,
+domínio ou serviços com billing. A CI verifica o projeto; não publica imagens
+nem executa CD.
+
+Este runbook documenta a stack reproduzível de produção local: Nginx, proxy,
+secrets, migrações, health checks, persistência, HTTPS opcional, backup/restore e
+rollback. Para experimentar o painel pelo caminho mais curto, consulte a
+[execução local no README](../README.md#executando-localmente).
+
+A release pública destacada é
+[v1.1.0](https://github.com/Jos3Vitor34/orderflow/releases/tag/v1.1.0).
+A branch `main` contém evoluções posteriores, incluindo o frontend em container
+e a stack descrita aqui. Essas mudanças não são atribuídas retroativamente à
+release, e sua tag permanece inalterada. Publicar uma release não depende de
+manter um servidor remoto.
 
 ## Arquitetura
 
 ```mermaid
 flowchart TD
-    Browser[Navegador] -->|HTTPS no destino autorizado| TLS[TLS no Nginx ou plataforma]
+    Browser[Navegador local] -->|HTTP ou HTTPS opcional em loopback| TLS[Listener local do Nginx]
     TLS --> Frontend[Nginx sem root / React estático]
     Frontend -->|/api/v1 e health| API[FastAPI / um processo]
     API --> PG[(PostgreSQL / volume persistente)]
@@ -53,6 +67,9 @@ $env:IMAGE_TAG = git rev-parse HEAD
 
 Edite `.env.production`: tag exata do commit, diretório de secrets, nome/user do
 banco, bind/porta frontend, origem CORS exata, nível de log e concorrência.
+Mantenha o bind em `127.0.0.1` e use a origem local escolhida, por exemplo
+`CORS_ORIGINS=http://127.0.0.1:8080`; o hostname `.invalid` do exemplo é apenas
+um placeholder e deve ser substituído.
 Nunca use `latest` como única referência. Variáveis exportadas no terminal têm
 precedência sobre `.env.production`; confira-as antes de operar outro ambiente.
 Arquivos `.env.production`, `.secrets/`, `.certs/` e `.backups/` são ignorados no
@@ -78,15 +95,15 @@ passa somente configuração pública via environment.
 | `postgres_password` | Secret de infraestrutura | `POSTGRES_PASSWORD_FILE` no PostgreSQL |
 | `redis_password`, `redis_acl` | Secrets de infraestrutura | Credencial de health e ACL do Redis |
 | `ORDERFLOW_ADMIN_PASSWORD` | Secret temporário opcional | Bootstrap; prefira prompt sem eco |
-| Certificado TLS | Público | Cadeia PEM do domínio autorizado |
+| Certificado TLS | Público | Cadeia PEM correspondente ao hostname local |
 | Chave privada TLS | Secret | Montada apenas no frontend com overlay TLS |
 | `IMAGE_TAG`, `SECRETS_DIR`, `POSTGRES_DB`, `POSTGRES_USER`, portas/binds | Configuração pública | Compose |
 | `CORS_ORIGINS`, `LOG_LEVEL`, concorrência, TTL JWT | Configuração pública | Aplicação/processos |
 | `VITE_API_BASE_URL=/api/v1` | Configuração pública de build | Incorporada ao bundle |
 
-Em deploy remoto, obtenha secrets pelo mecanismo seguro do operador/provedor,
-nunca por commit, argumento de build ou logs. Monte arquivos legíveis pelo UID
-do container e proteja o diretório no host contra outros usuários. Compose local
+Gere e mantenha os secrets no host local, nunca em commit, argumento de build
+ou logs. Monte arquivos legíveis pelo UID do container e proteja o diretório no
+host contra outros usuários. Compose local
 usa bind mounts: `uid/gid/mode` de secrets file não mudam permissões do arquivo
 original. Defina ownership/permissões adequados no host; não dependa de `mode`
 para corrigir arquivos ilegíveis. Secrets locais não são um cofre criptografado.
@@ -103,7 +120,7 @@ só inicializa um volume vazio. Rotacionar secrets requer recriar consumidores.
 
 O gerador abaixo é **somente para smoke local**, cria senhas aleatórias e recusa
 sobrescrever arquivos existentes. Mantém diretório 0700 no Linux e arquivos
-legíveis pelos bind mounts dos containers; não reutilize os secrets no remoto.
+legíveis pelos bind mounts dos containers; não reutilize os secrets entre ambientes.
 No Windows, mantenha os arquivos na conta local e revise ACLs antes de outro uso.
 
 ```powershell
@@ -131,12 +148,12 @@ Uma nova aba sem opener inicia `sessionStorage` vazio; abas abertas com opener
 podem receber uma cópia inicial segundo o comportamento padrão do navegador.
 Verifique sidebar, tabelas, formulários, modais e detalhes em desktop/tablet/mobile.
 
-## Build, migration e atualização de um destino autorizado
+## Build, migration e atualização local
 
-Antes: destino/custos aprovados, backup verificado, secrets corretos, imagens do
-commit aprovado e CI verde. Se houver registry, use-o só quando autorizado pelo
-destino; a CI atual não publica imagens. Guarde imagens/digests anteriores para
-rollback. Não reutilize o volume local de smoke para dados reais.
+Antes: backup verificado, secrets corretos, imagens do commit escolhido e
+Quality/Security aprovados. As imagens são construídas e usadas localmente,
+sem registry remoto. Guarde imagens/digests anteriores para rollback. Mantenha
+os dados sintéticos de smoke em volumes separados dos demais ambientes locais.
 
 ```bash
 docker compose --env-file .env.production -f compose.production.yaml config --quiet
@@ -151,27 +168,28 @@ docker compose --env-file .env.production -f compose.production.yaml up -d --wai
 No primeiro startup, `depends_on` exige PostgreSQL saudável → Alembic concluído →
 API ready → frontend/worker. Migration tem restart `no`; serviços contínuos têm
 `unless-stopped`. Nunca execute migration em cada réplica. Há janela de manutenção
-durante uma atualização Compose; não há garantia de deploy sem indisponibilidade.
+durante uma atualização Compose; não há garantia de atualização sem indisponibilidade.
 Mantenha um nome de projeto fixo por ambiente para preservar os volumes.
 
-## HTTPS, proxy e Stripe
+## HTTPS local, proxy e Stripe
 
-O destino público deve usar HTTPS. Opções preparadas:
-
-1. Plataforma/load balancer termina TLS e encaminha ao frontend privado. Preserve
-   `/api/v1` na mesma origem, limite acesso à porta interna e mantenha firewall.
-2. Nginx termina TLS com certificado e chave fornecidos pelo operador:
+O HTTP em loopback atende à demonstração local. Para exercitar TLS, o overlay
+opcional permite ao Nginx usar certificado e chave locais, sem adquirir domínio
+ou contratar serviço. Configure `TLS_CERTIFICATE_FILE` e `TLS_PRIVATE_KEY_FILE`
+com os arquivos PEM, mantenha `HTTPS_BIND=127.0.0.1` e ajuste `CORS_ORIGINS` para
+a origem HTTPS local, por exemplo `https://localhost:8443`:
 
 ```bash
 docker compose --env-file .env.production -f compose.production.yaml -f compose.https.yaml config --quiet
 docker compose --env-file .env.production -f compose.production.yaml -f compose.https.yaml up -d --wait
 ```
 
-O overlay substitui a publicação HTTP pela HTTPS (8443 interno; configure 443
-no host autorizado). Default continua loopback. Configure `HTTPS_BIND` somente
-após revisar firewall/exposição. Não há compra de domínio, emissão automática
-ou renovação de certificados; o operador precisa fornecer cadeia válida para o
-hostname, manter renovação e recriar frontend após rotação. HSTS é enviado só
+O overlay substitui a publicação HTTP pela HTTPS (8443 interno e, por padrão,
+8443 no host). O certificado deve corresponder ao hostname local e ser confiável
+para o cliente de teste. A CI gera um certificado autoassinado de curta duração
+exclusivamente para o smoke local e executa `scripts/smoke_tls.py` com a CA
+explícita. Não há emissão automática ou renovação de certificados; recrie o
+frontend após substituir os arquivos. HSTS é enviado só
 no listener TLS; não há `includeSubDomains` nem preload. O listener HTTP interno
 mantém `/healthz` para Docker e redireciona outras rotas, sem publicar essa porta.
 
@@ -182,7 +200,7 @@ não precisa gerar URLs públicas nem cookies; o navegador usa caminhos relativo
 Se uma futura integração exigir IP/esquema original atrás de outro proxy, configure
 explicitamente a allowlist desse proxy em uma mudança auditada. Não use trust `*`.
 Redirects de path canônico da API são reescritos como caminhos relativos pelo
-Nginx, preservando HTTPS inclusive quando TLS termina na plataforma externa.
+Nginx, preservando HTTPS no listener local.
 CORS continua configurável com origens exatas e sem cookies (`allow_credentials=False`).
 
 Timeouts: Axios 15s; conexão proxy 5s, leitura/envio 15s, resolução Docker DNS 2s;
@@ -191,14 +209,16 @@ global. Não foram aumentados timeouts/retries Stripe nem política de retry Cel
 Celery preserva retries limitados para falhas transitórias de banco; shutdown do
 worker tem graça de 30s. Verifique tasks/logs após encerrar e reiniciar o worker.
 
-Stripe permanece Test Mode, sem cartão real. O webhook real é
-`https://<hostname-autorizado>/api/v1/webhooks/stripe`; exige assinatura
-`Stripe-Signature` e signing secret **desse endpoint**. Não reutilize signing secret
-da Stripe CLI local. Teste PaymentIntent/refund/webhook somente com autorização
-e credenciais de teste do ambiente. A API não expõe `client_secret`: não há
-Stripe Elements/confirmação de cartão no navegador. Não há refresh token/signup.
+Stripe permanece em Test Mode, sem cobrança real. A rota de webhook
+`/api/v1/webhooks/stripe` exige assinatura `Stripe-Signature` e o signing secret
+correspondente. Para um teste opcional com Stripe CLI, encaminhe eventos ao proxy
+local `http://127.0.0.1:8080/api/v1/webhooks/stripe` e configure
+`STRIPE_WEBHOOK_SECRET` com o secret emitido por essa sessão do CLI. Mantenha
+somente credenciais de Test Mode; a demonstração com pagamentos manuais e os
+smokes de containers não dependem de Stripe. A API não expõe `client_secret`:
+não há Stripe Elements/confirmação de cartão no navegador. Não há refresh token/signup.
 
-## Health, logs e smoke remoto
+## Health, logs e verificação local
 
 `/healthz` mede Nginx; `/health/live` mede processo API; `/health/ready` testa
 PostgreSQL e Redis e retorna 503 quando indisponíveis. Readiness deve passar antes
@@ -218,18 +238,20 @@ registra método/path/status e correlation ID devolvido pela API, sem query stri
 Authorization ou corpo. Não copie credenciais para relatórios. Error log Nginx
 pode conter a URI de uma requisição com erro; nunca coloque secrets em URLs.
 
-Após deploy autorizado, confira certificado válido/HTTPS, frontend/assets, três
-health endpoints, login, domínio completo do painel, roles, idiomas, logout,
-refresh, responsividade e ausência de mixed content. Use dados sintéticos e conta
-de teste. O script local não deve ser apontado para remoto/dados reais.
+Após iniciar ou atualizar a stack local, confira frontend/assets, três health
+endpoints, login, fluxos do painel, roles, idiomas, logout, refresh e
+responsividade. Ao usar o overlay TLS, verifique também o certificado e a
+ausência de mixed content. Use dados sintéticos e conta de teste; os scripts de
+smoke operam somente em loopback e ambiente isolado.
 
 ## Backup e restore
 
-PostgreSQL contém os dados de domínio: backup ao menos diário e antes de cada
-migration, em armazenamento separado, criptografado, com acesso restrito e retenção
-definida pelo operador (base inicial: 7 diários + 4 semanais). Teste restore
-regularmente em projeto/banco isolado. Em banco gerenciado, habilite backup/PITR
-do provedor e teste recuperação antes de considerar o deploy pronto.
+PostgreSQL contém os dados de domínio. Para dados locais que devam ser
+preservados, faça backup antes de cada migration e adote uma frequência adequada
+ao uso; em uso contínuo, a referência é ao menos diária. Use armazenamento local
+separado, criptografado, com acesso restrito e retenção definida (base inicial:
+7 diários + 4 semanais). Teste restore regularmente em projeto/banco isolado.
+Esses procedimentos não exigem banco gerenciado ou serviço de backup contratado.
 
 Use `pg_dump` dentro do container e `compose cp`, evitando redirecionar bytes
 binários pelo Windows PowerShell 5.1:
@@ -262,26 +284,23 @@ do schema e recrie **apenas consumidores** com `up -d --no-deps api worker front
 Valide readiness e smoke. Não rode migrations antigas automaticamente; não faça
 `alembic downgrade` em dados reais. Se o schema novo não for compatível, mantenha
 manutenção e use correção progressiva ou restore de backup para banco isolado,
-com decisão explícita sobre perda de dados. Nunca use `down -v` em produção.
+com decisão explícita sobre perda de dados. Nunca use `down -v` em volumes que
+precisam ser preservados.
 `down` sem volumes preserva PostgreSQL/Redis; use projeto fixo ao reiniciar.
 
-## Segurança e opções de destino
+## Segurança e manutenção local
 
 Quality testa ambos os projetos e a stack. Security faz Gitleaks, npm audit,
 pip-audit, Trivy HIGH/CRITICAL e SBOM CycloneDX para ambas as imagens. Existem
 oito exceções Debian preexistentes, restritas por pacote e com expiração em
 **22/10/2026**, descritas na [revisão](SECURITY_REVIEW_PHASE_19.md). Não foram
-ampliadas/renovadas. Reavalie antes de qualquer deploy após essa data.
+ampliadas/renovadas. A reavaliação permanece prevista para **22/10/2026**,
+independentemente da ausência de deploy remoto.
 
-| Opção | Preparação necessária | Custo e operação |
-| --- | --- | --- |
-| VM/servidor já existente | Docker, firewall, certificado, disco e backup | Sem nova contratação; usa capacidade existente. Operador mantém OS/TLS/backups. |
-| VPS/VM nova | Aprovação do provedor/plano/região, SSH, TLS, backup | Mensalidade, disco, tráfego e backup dependem do plano; cotação antes de provisionar. |
-| Plataforma de containers + PG/Redis privados | Adequar serviços/jobs/volumes/secrets ao provedor e registry | Compute, banco, Redis, storage e saída podem ser cobrados separadamente; verificar proposta completa. |
-
-Nenhuma opção foi contratada. Não há custo cloud novo, URL pública, domínio,
-certificado remoto ou região a reportar. Um provedor será escolhido somente com
-destino e orçamento autorizados; não há promessa de free tier ou preço fixo.
+A operação documentada termina na máquina local. Não há próximo passo de
+provisionamento remoto, contratação de infraestrutura ou configuração de CD.
+O GitHub reúne o código, a documentação, o guia de capturas da interface, os
+resultados da CI e a release pública destacada.
 
 Referências: [produção com Compose](https://docs.docker.com/compose/how-tos/production/),
 [secrets Compose](https://docs.docker.com/compose/how-tos/use-secrets/),
