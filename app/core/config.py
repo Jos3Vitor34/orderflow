@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        secrets_dir="/run/secrets" if Path("/run/secrets").is_dir() else None,
     )
 
     database_url: PostgresDsn = PostgresDsn(

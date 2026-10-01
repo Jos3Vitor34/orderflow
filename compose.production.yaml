@@ -1,0 +1,140 @@
+# Standalone configuration: do not merge this file with development compose.yaml.
+services:
+  frontend:
+    build: {context: ./frontend}
+    image: orderflow-frontend:${IMAGE_TAG:?Set IMAGE_TAG to a commit SHA or approved tag}
+    ports: ["${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-8080}:8080"]
+    networks: [edge]
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17.10-alpine3.24@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orderflow}
+      POSTGRES_USER: ${POSTGRES_USER:-orderflow}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.2.9-alpine@sha256:5f2e6a105b2a8cc721911d5d29aadb032c25fe55b43e829e3d03413753ff47c2
+    command: [redis-server, --aclfile, /run/secrets/redis_acl, --appendonly, 'yes']
+    secrets: [redis_acl, redis_password]
+    volumes: [redis_data:/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli --user orderflow ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  migrate:
+    image: orderflow-api:${IMAGE_TAG:?Set IMAGE_TAG}
+    command: [alembic, upgrade, head]
+    environment: &app-environment
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set exact CORS_ORIGINS}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      CELERY_TASK_ALWAYS_EAGER: 'false'
+      READINESS_TIMEOUT_SECONDS: '2'
+      STRIPE_CURRENCY: brl
+    secrets: &app-secrets
+      - DATABASE_URL
+      - REDIS_URL
+      - CELERY_BROKER_URL
+      - CELERY_RESULT_BACKEND
+      - JWT_SECRET_KEY
+      - STRIPE_SECRET_KEY
+      - STRIPE_WEBHOOK_SECRET
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: 'no'
+
+  api:
+    build: {context: .}
+    image: orderflow-api:${IMAGE_TAG:?Set IMAGE_TAG}
+    command: [python, -m, app.server]
+    environment:
+      <<: *app-environment
+      SERVICE_NAME: orderflow-api
+    secrets: *app-secrets
+    networks: [edge, data]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  worker:
+    image: orderflow-api:${IMAGE_TAG:?Set IMAGE_TAG}
+    command: [celery, -A, 'app.celery_app:celery_app', worker, '--loglevel=${LOG_LEVEL:-INFO}', '--hostname=worker@%h', '--concurrency=${CELERY_CONCURRENCY:-2}']
+    hostname: orderflow-worker
+    environment:
+      <<: *app-environment
+      SERVICE_NAME: orderflow-worker
+    secrets: *app-secrets
+    networks: [data]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, 'celery -A app.celery_app:celery_app inspect ping --destination worker@orderflow-worker --timeout 5 | grep -q pong']
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+networks:
+  edge:
+  data: {internal: true}
+volumes:
+  postgres_data:
+  redis_data:
+secrets:
+  postgres_password: {file: '${SECRETS_DIR:?Set SECRETS_DIR}/postgres_password'}
+  redis_password: {file: '${SECRETS_DIR}/redis_password'}
+  redis_acl: {file: '${SECRETS_DIR}/redis_acl'}
+  DATABASE_URL: {file: '${SECRETS_DIR}/DATABASE_URL'}
+  REDIS_URL: {file: '${SECRETS_DIR}/REDIS_URL'}
+  CELERY_BROKER_URL: {file: '${SECRETS_DIR}/CELERY_BROKER_URL'}
+  CELERY_RESULT_BACKEND: {file: '${SECRETS_DIR}/CELERY_RESULT_BACKEND'}
+  JWT_SECRET_KEY: {file: '${SECRETS_DIR}/JWT_SECRET_KEY'}
+  STRIPE_SECRET_KEY: {file: '${SECRETS_DIR}/STRIPE_SECRET_KEY'}
+  STRIPE_WEBHOOK_SECRET: {file: '${SECRETS_DIR}/STRIPE_WEBHOOK_SECRET'}

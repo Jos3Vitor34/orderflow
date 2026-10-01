@@ -23,6 +23,9 @@ coverage.xml
 htmlcov/
 .env
 .env.*
+.secrets/
+.certs/
+.backups/
 !.env.example
 *.log
 .idea/
