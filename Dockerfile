@@ -6,6 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Apply Debian security patches for PCRE2 and OpenSSL without changing Python.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends --only-upgrade \
+        libpcre2-8-0 libssl3t64 openssl openssl-provider-legacy \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system orderflow \
     && useradd --system --gid orderflow --home-dir /app orderflow
 
