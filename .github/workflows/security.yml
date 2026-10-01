@@ -102,19 +102,27 @@ jobs:
         run: '"$RUNNER_TEMP/gitleaks" dir . --redact=100 --no-banner'
 
   image:
-    name: Docker vulnerability scan and SBOM
+    name: Docker vulnerability scan and SBOM (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: api
+            context: .
+          - target: frontend
+            context: frontend
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Build runtime image
-        run: docker build --pull -t orderflow-api:ci .
+        run: docker build --pull -t orderflow-${{ matrix.target }}:${{ github.sha }} ${{ matrix.context }}
       - name: Scan HIGH and CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          image-ref: orderflow-api:ci
+          image-ref: orderflow-${{ matrix.target }}:${{ github.sha }}
           version: v0.74.0
           scanners: vuln
           format: table
@@ -125,7 +133,7 @@ jobs:
       - name: Generate CycloneDX SBOM
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8 # v0.36.0
         with:
-          image-ref: orderflow-api:ci
+          image-ref: orderflow-${{ matrix.target }}:${{ github.sha }}
           version: v0.74.0
           format: cyclonedx
           output: sbom.cdx.json
@@ -133,7 +141,7 @@ jobs:
       - name: Upload SBOM
         uses: actions/upload-artifact@v7
         with:
-          name: image-sbom
+          name: image-sbom-${{ matrix.target }}
           path: sbom.cdx.json
           if-no-files-found: error
           retention-days: 14

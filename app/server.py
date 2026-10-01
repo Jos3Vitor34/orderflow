@@ -13,6 +13,7 @@ def main() -> None:
         port=8000,
         access_log=False,
         log_config=None,
+        proxy_headers=False,
     )
 
 

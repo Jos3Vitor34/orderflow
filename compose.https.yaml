@@ -1,0 +1,12 @@
+# Optional direct TLS termination with operator-provided certificate files.
+# Requires Docker Compose >= 2.24.4 for !override. Never combine with development.
+services:
+  frontend:
+    ports: !override
+      - "${HTTPS_BIND:-127.0.0.1}:${HTTPS_PORT:-8443}:8443"
+    volumes:
+      - ./frontend/nginx/https.conf:/etc/nginx/conf.d/default.conf:ro
+    secrets: [tls_certificate, tls_private_key]
+secrets:
+  tls_certificate: {file: '${TLS_CERTIFICATE_FILE:?Set TLS_CERTIFICATE_FILE}'}
+  tls_private_key: {file: '${TLS_PRIVATE_KEY_FILE:?Set TLS_PRIVATE_KEY_FILE}'}

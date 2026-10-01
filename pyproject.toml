@@ -55,6 +55,7 @@ quote-style = "double"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S"]  # Fixtures intentionally use synthetic credentials and pytest assertions.
+"scripts/smoke_containers.py" = ["S101"]  # Assertions are checks in a standalone test harness.
 
 [tool.mypy]
 python_version = "3.12"

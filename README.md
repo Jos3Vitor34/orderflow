@@ -70,6 +70,10 @@ frontend usa `VITE_API_BASE_URL=http://localhost:8000` por padrão. Consulte o
 [guia do frontend](frontend/README.md) para páginas, configuração e comandos de
 qualidade.
 
+O Compose também serve o build estático do painel em `http://localhost:8080`,
+com Nginx sem privilégios e proxy same-origin para `/api/v1`. O Vite na porta
+5173 permanece disponível para desenvolvimento com recarregamento de código.
+
 ## Frontend
 
 O código do painel fica em `frontend/`; o backend permanece na raiz. As páginas
@@ -84,7 +88,8 @@ nem refresh token. O frontend não inclui Stripe Elements porque a resposta do
 PaymentIntent não contém `client_secret`; criação e acompanhamento usam somente
 os endpoints disponíveis, com Stripe em Test Mode.
 
-O navegador acessa a API diretamente. `CORS_ORIGINS` configura uma lista de
+No desenvolvimento com Vite, o navegador acessa a API diretamente.
+`CORS_ORIGINS` configura uma lista de
 origens HTTP separadas por vírgulas, com `http://localhost:5173` e
 `http://127.0.0.1:5173` permitidas por padrão. Adicione a origem exata do painel
 quando usar outra porta ou host. Variáveis `VITE_*` são públicas no bundle;
@@ -93,6 +98,30 @@ segredos JWT, banco e Stripe permanecem apenas no backend.
 No diretório `frontend/`, execute `npm run typecheck`, `npm run lint`,
 `npm run test` e `npm run build`. A CI executa esses comandos com `npm ci` e
 mantém os checks existentes do backend.
+
+## Production / Deployment
+
+O frontend possui build Docker multi-stage (Node 24 → Nginx 1.30 sem root).
+O bundle usa `/api/v1` relativa; a mesma imagem funciona em HTTP local e HTTPS,
+sem incluir secrets ou hostname interno Docker no navegador. Assets com hash
+têm cache longo; `index.html` não tem cache e rotas React aceitam refresh.
+
+`compose.yaml` é o ambiente de desenvolvimento. A configuração independente
+`compose.production.yaml` contém frontend, API, job Alembic, worker, PostgreSQL
+e Redis com autenticação e AOF. Somente o frontend publica uma porta, em loopback
+por padrão. Banco e Redis usam rede privada e volumes persistentes. Secrets são
+montados em `/run/secrets`; `.env.production.example` contém apenas configuração
+pública. Migrations terminam antes da API; readiness libera frontend e worker.
+
+O [runbook de deploy](docs/DEPLOYMENT.md) documenta configuração, build com tag
+do commit, secrets, validação local, HTTPS opcional, logs, backups e rollback.
+`compose.https.yaml` termina TLS com certificado fornecido pelo operador; uma
+plataforma também pode terminar TLS antes do proxy privado. Stripe continua em
+Test Mode e não há Stripe Elements, cadastro público ou refresh token.
+
+**Ainda não há destino autorizado nem deploy remoto.** A preparação não cria
+recursos cloud, não publica imagens e não faz CD automático. Uma nova release
+depende de deploy remoto autorizado e validado, além da CI verde.
 
 ## Ambiente de desenvolvimento
 
@@ -729,7 +758,8 @@ docker compose up -d --build
 docker compose ps
 ```
 
-PostgreSQL, Redis e API são publicados apenas em `127.0.0.1` por padrão;
+No Compose de desenvolvimento, frontend, PostgreSQL, Redis e API são publicados
+apenas em `127.0.0.1` por padrão;
 containers conversam pela rede interna do Compose. A imagem executa como usuário
 `orderflow` sem privilégios de root e tem healthcheck HTTP de liveness.
 
@@ -785,10 +815,13 @@ não ser publicada embora o commit tenha sido concluído. Não há deploy públi
 ## Segurança e manutenção
 
 Os workflows de qualidade verificam o frontend (tipos, lint, testes e build),
-Ruff, mypy, testes, PostgreSQL, migrations e cobertura de branches. O workflow
+Ruff, mypy, testes, PostgreSQL, migrations, cobertura de branches e os manifests
+Compose. O job de containers constrói as duas imagens e valida health, SPA,
+proxy, JWT, roles, Celery, persistência e indisponibilidade da API. O workflow
 de segurança audita dependências Python instaladas e dependências npm do frontend,
-varre árvore e histórico Git com Gitleaks, faz build e scan HIGH/CRITICAL da imagem
-com Trivy e gera uma SBOM CycloneDX como artefato da CI. Nenhum workflow publica
+varre árvore e histórico Git com Gitleaks, faz build e scan HIGH/CRITICAL das imagens
+backend e frontend com Trivy e gera duas SBOMs CycloneDX como artefatos da CI.
+Nenhum workflow publica
 imagem ou faz deploy. As execuções remotas podem ser acompanhadas na aba Actions
 do repositório.
 
@@ -813,7 +846,8 @@ preserva o volume. Nunca use `down -v` para limpar alguns registros.
 
 Além das limitações acima, não há refresh token, rate limiting distribuído,
 outbox transacional, notificações reais ou deploy de produção. A entrega Celery é
-ao menos uma vez; o Redis é efêmero e pode perder mensagens/resultados quando
+ao menos uma vez; no Compose de desenvolvimento o Redis é efêmero e pode perder
+mensagens/resultados quando
 reiniciado. A autenticação de providers genéricos não usa assinatura própria:
 somente operadores autenticados podem enviar seus eventos.
 

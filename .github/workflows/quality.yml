@@ -17,7 +17,7 @@ jobs:
   quality:
     name: Quality
     if: always()
-    needs: [frontend, static-and-unit, postgres-integration]
+    needs: [frontend, static-and-unit, postgres-integration, containers]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -86,7 +86,53 @@ jobs:
         env:
           JWT_SECRET_KEY: ci-only-secret-key-that-is-at-least-32-characters
       - name: Compose syntax
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose --env-file .env.production.example -f compose.production.yaml config --quiet
+          docker compose --env-file .env.production.example -f compose.production.yaml -f compose.https.yaml config --quiet
+
+  containers:
+    name: Production containers and HTTP smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+      SECRETS_DIR: ./.secrets/local-smoke
+      CORS_ORIGINS: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Generate isolated local credentials
+        run: python scripts/local_production_secrets.py
+      - name: Build both production images
+        run: docker compose --env-file .env.production.example -f compose.production.yaml -p orderflow-ci-smoke build
+      - name: Start migration, API, worker, and Nginx
+        run: docker compose --env-file .env.production.example -f compose.production.yaml -p orderflow-ci-smoke up -d --wait --wait-timeout 180
+      - name: Smoke SPA, proxy, JWT, roles, jobs, persistence, and outage
+        run: python scripts/smoke_containers.py --project orderflow-ci-smoke
+      - name: Prepare certificate exclusively for local TLS smoke
+        run: |
+          mkdir -m 700 .certs
+          openssl req -x509 -newkey rsa:2048 -noenc -days 1 \
+            -keyout .certs/privkey.pem -out .certs/fullchain.pem \
+            -subj /CN=localhost -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>/dev/null
+          chmod 644 .certs/privkey.pem
+      - name: Start optional TLS listener
+        run: docker compose --env-file .env.production.example -f compose.production.yaml -f compose.https.yaml -p orderflow-ci-smoke up -d --wait --wait-timeout 120
+      - name: Validate certificate, SPA, HSTS, and API behind HTTPS
+        run: python scripts/smoke_tls.py --ca .certs/fullchain.pem
+      - name: Container status and logs
+        if: always()
+        run: |
+          docker compose --env-file .env.production.example -f compose.production.yaml -p orderflow-ci-smoke ps -a
+          docker compose --env-file .env.production.example -f compose.production.yaml -p orderflow-ci-smoke logs --no-color --tail 80
+      - name: Stop isolated stack while preserving volumes
+        if: always()
+        run: docker compose --env-file .env.production.example -f compose.production.yaml -p orderflow-ci-smoke down
 
   postgres-integration:
     name: PostgreSQL integration and branch coverage
