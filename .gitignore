@@ -4,6 +4,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+frontend/node_modules/
+frontend/dist/
 
 # Virtual environments
 .venv/
@@ -13,6 +15,9 @@ venv/
 .env
 .env.*
 !.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
 # Test and quality caches
 .pytest_cache/
@@ -28,6 +33,7 @@ pytest-cache-files-*/
 coverage.xml
 *.sbom.json
 htmlcov/
+frontend/coverage/
 
 # Editors and operating systems
 .idea/
