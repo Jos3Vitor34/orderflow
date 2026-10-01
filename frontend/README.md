@@ -94,3 +94,34 @@ npm run build
 
 Os testes usam Vitest e React Testing Library. `npm run build` gera `dist/`,
 que não é versionado. A CI executa os quatro comandos após `npm ci`.
+
+## Container de produção
+
+Na raiz, `docker compose up -d --build --wait` serve também o painel em
+`http://localhost:8080`. O Dockerfile usa Node 24 com `npm ci` somente no build;
+a imagem final contém Nginx sem root e `dist/`, sem Node, dependências npm,
+`.env` ou source maps. As bases são fixadas por versão e digest.
+
+```bash
+docker build -t orderflow-frontend:<commit-sha> frontend
+# Para diagnóstico com uma API já acessível como api:8000 na rede indicada:
+docker run --rm --read-only --tmpfs /tmp --cap-drop ALL \
+  --security-opt no-new-privileges --network <rede-da-api> \
+  -p 127.0.0.1:8080:8080 orderflow-frontend:<commit-sha>
+```
+
+O Nginx escuta em 8080, tem `/healthz` independente da API e encaminha `/api/*`
+para `api:8000` preservando o path. `/health`, `/health/live` e `/health/ready`
+são encaminhados ao backend para monitoramento. Falhas da API mantêm seus códigos
+HTTP; o fallback React só trata rotas do painel. Assets com hash têm cache
+de um ano e `index.html` usa `no-store`. Há gzip, proteção contra frames,
+`nosniff`, referrer policy e ocultação da versão do servidor.
+
+O build define a variável **pública** `VITE_API_BASE_URL=/api/v1`. Não há variável
+`VITE_*` secreta nem alteração de ambiente no startup. Isso permite reutilizar
+a imagem atrás de HTTPS sem mixed content. O `.env` do Vite é apenas para o
+desenvolvimento no host e está excluído do contexto Docker.
+
+Para a stack independente de produção, secrets, TLS e rollback, siga o
+[runbook](../docs/DEPLOYMENT.md). O desenvolvimento com `npm run dev` continua
+igual. Nenhuma imagem é publicada automaticamente e ainda não há deploy remoto.
