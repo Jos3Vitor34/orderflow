@@ -1,0 +1,46 @@
+.dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.dashboard-metric {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+  min-height: 8.5rem;
+}
+
+.dashboard-metric-label { color: #64748b; font-size: .9rem; }
+.dashboard-metric-value { color: #102a43; font-size: clamp(1.4rem, 2vw, 1.85rem); letter-spacing: -.04em; }
+.dashboard-metrics .muted { font-size: .8rem; }
+
+.dashboard-breakdowns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.dashboard-breakdown h2, .dashboard-operations h2 { margin: 0 0 1rem; font-size: 1rem; }
+.dashboard-status-list { list-style: none; padding: 0; margin: 0; }
+.dashboard-status-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .5rem 0; border-bottom: 1px solid #eef2f6; }
+.dashboard-status-list li:last-child { border-bottom: 0; }
+.dashboard-status-list strong { font-variant-numeric: tabular-nums; }
+.dashboard-bar { display: flex; overflow: hidden; height: .45rem; margin-top: 1rem; border-radius: 999px; background: #e9eff4; }
+.dashboard-bar span { display: block; }
+.dashboard-bar-pending, .dashboard-bar-processing { background: #d59b31; }
+.dashboard-bar-confirmed, .dashboard-bar-approved, .dashboard-bar-delivered { background: #1d9988; }
+.dashboard-bar-shipped, .dashboard-bar-partially_refunded, .dashboard-bar-refunded { background: #508ab9; }
+.dashboard-bar-failed, .dashboard-bar-cancelled { background: #d66767; }
+.dashboard-operations { margin-top: 1rem; }
+.dashboard-operation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
+.dashboard-operation-grid span { display: flex; flex-direction: column; gap: .4rem; padding: .8rem; border-radius: .65rem; background: #f3f7f9; color: #64748b; font-size: .82rem; }
+.dashboard-operation-grid strong { color: #17324d; font-size: 1.3rem; }
+.dashboard-timestamp { text-align: right; font-size: .8rem; margin: 1rem 0 0; }
+
+@media (max-width: 900px) { .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .dashboard-metrics, .dashboard-breakdowns { grid-template-columns: 1fr; }
+  .dashboard-operation-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
