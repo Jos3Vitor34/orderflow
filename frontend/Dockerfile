@@ -9,6 +9,10 @@ COPY src ./src
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.30.5-alpine3.24@sha256:ed04ec1ff34502c339ee5c3ae3f855442398edc1d05591e2b98981dcbbd20b1e
+# Apply the Alpine fix for CVE-2026-103111 while preserving the pinned base.
+USER root
+RUN apk add --no-cache 'pcre2>=10.49-r0'
+USER 101:101
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/locations.conf nginx/security-headers.conf /etc/nginx/orderflow/
 COPY --from=build /app/dist /usr/share/nginx/html
