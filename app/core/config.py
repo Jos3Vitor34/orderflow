@@ -1,7 +1,15 @@
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, PostgresDsn, RedisDsn, SecretStr, model_validator
+from pydantic import (
+    Field,
+    PostgresDsn,
+    RedisDsn,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,9 +38,34 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", min_length=1, max_length=32)
     correlation_id_max_length: int = Field(default=128, ge=16, le=256)
     readiness_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     stripe_secret_key: SecretStr | None = None
     stripe_webhook_secret: SecretStr | None = None
     stripe_currency: Literal["brl"] = "brl"
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, value: str) -> str:
+        origins = [origin.strip() for origin in value.split(",") if origin.strip()]
+        if not origins:
+            raise ValueError("CORS_ORIGINS must contain at least one origin")
+        for origin in origins:
+            parsed = urlsplit(origin)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.netloc
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+                or parsed.username
+                or parsed.password
+            ):
+                raise ValueError("CORS_ORIGINS must contain HTTP origins only")
+        return ",".join(origins)
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return self.cors_origins.split(",")
 
     @model_validator(mode="after")
     def reject_insecure_production_jwt_secret(self) -> "Settings":

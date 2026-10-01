@@ -45,6 +45,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-docker-only-secret-change-before-use}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-json}
       SERVICE_NAME: ${SERVICE_NAME:-orderflow-api}
